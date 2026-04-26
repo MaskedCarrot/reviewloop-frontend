@@ -7,11 +7,10 @@ import ActiveReviewPlatformsStrip from "@/components/ActiveReviewPlatformsStrip"
 import {
   getCredits,
   getDashboardStats,
-  getMyCreditRates,
   getPublicConfig,
-  getSessionBootstrap,
   listMyLocations,
 } from "@/lib/api";
+import { useDashboardBootstrap } from "./DashboardBootstrapProvider";
 import { activePlatformChips } from "@/lib/reviewPlatformsFromLocations";
 import DashboardOverviewSkeleton from "@/components/skeletons/DashboardOverviewSkeleton";
 import StyledSelect from "@/components/StyledSelect";
@@ -25,6 +24,7 @@ function pct(n: number, d: number): string {
 }
 
 export default function DashboardOverview() {
+  const { bootstrap } = useDashboardBootstrap();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [credits, setCredits] = useState<CreditState | null>(null);
   const [publicCfg, setPublicCfg] = useState<PublicConfig | null>(null);
@@ -37,19 +37,16 @@ export default function DashboardOverview() {
   useEffect(() => {
     let live = true;
     setError("");
-    Promise.all([
-      getDashboardStats(days),
-      getSessionBootstrap().catch(() => null),
-      getMyCreditRates().catch(() => null),
-    ])
-      .then(async ([s, boot, r]) => {
+    getDashboardStats(days)
+      .then(async (s) => {
         if (!live) return;
         setStats(s);
-        setMyRates(r);
+        const boot = bootstrap;
         if (boot) {
           setCredits(boot.credits);
           setPublicCfg(boot.config);
           setLocations(boot.locations?.locations ?? []);
+          setMyRates(boot.credit_rates);
         } else {
           const [c, p, locs] = await Promise.all([
             getCredits().catch(() => null),
@@ -71,7 +68,7 @@ export default function DashboardOverview() {
     return () => {
       live = false;
     };
-  }, [days]);
+  }, [days, bootstrap]);
 
   const sent = stats?.funnel.sent ?? 0;
   const view = stats?.funnel.view ?? 0;

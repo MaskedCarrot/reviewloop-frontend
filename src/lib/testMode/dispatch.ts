@@ -542,6 +542,9 @@ export function dispatchTestMode(
   if (method === "POST" && path === "/api/reviewloop/dev/bootstrap") {
     return { user: { ...getTestState().user }, seed: { seeded: true, test_mode: true } };
   }
+  if (method === "GET" && path === "/api/reviewloop/me") {
+    return { ...getTestState().user };
+  }
   if (method === "GET" && path.startsWith("/api/users/")) {
     return { ...getTestState().user };
   }

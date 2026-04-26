@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { createSequence, getSessionBootstrap, listCampaigns, listSequences } from "@/lib/api";
+import { createSequence, listCampaigns, listSequences } from "@/lib/api";
+import { useDashboardBootstrap } from "../DashboardBootstrapProvider";
 import { shortDate } from "@/app/dashboard/contacts/_components/contactFormat";
 import EnrollInCampaignDialog from "@/app/dashboard/contacts/_components/EnrollInCampaignDialog";
 import ActiveReviewPlatformsStrip from "@/components/ActiveReviewPlatformsStrip";
@@ -37,6 +38,7 @@ function listStatusPillClass(s: ReviewSequenceListStatus) {
 }
 
 export default function ActiveCampaignsPage() {
+  const { bootstrap: sharedBootstrap, refreshBootstrap } = useDashboardBootstrap();
   const [items, setItems] = useState<ReviewSequence[]>([]);
   const [listTotal, setListTotal] = useState(0);
   const [listPage, setListPage] = useState(1);
@@ -78,7 +80,8 @@ export default function ActiveCampaignsPage() {
   const bootstrap = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, boot] = await Promise.all([listCampaigns(), getSessionBootstrap()]);
+      const [c, boot] = await Promise.all([listCampaigns(), sharedBootstrap ? Promise.resolve(sharedBootstrap) : refreshBootstrap()]);
+      if (!boot) return;
       setTemplates(c.campaigns);
       setBiz(boot.business);
       setCfg(boot.config);
@@ -88,7 +91,7 @@ export default function ActiveCampaignsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [sharedBootstrap, refreshBootstrap]);
 
   const loadSequences = useCallback(async () => {
     setListLoading(true);

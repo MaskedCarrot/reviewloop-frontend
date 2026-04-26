@@ -1,22 +1,30 @@
 "use client";
 
-import { useLayoutEffect, useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
-import { getMyBusiness } from "@/lib/api";
 import { useBrowserLocalMockApp } from "@/lib/useBrowserLocalMockApp";
 import DashboardDocumentTitle from "@/components/DashboardDocumentTitle";
 import DashboardNav from "@/components/DashboardNav";
 import { DashboardNavigationProvider } from "@/components/DashboardNavigationContext";
 import DashboardNavProgress from "@/components/DashboardNavProgress";
 import PageLoader from "@/components/PageLoader";
-import type { Business } from "@/types";
+import { DashboardBootstrapProvider, useDashboardBootstrap } from "./DashboardBootstrapProvider";
 
 const ONBOARDING_PATH = "/dashboard/onboarding";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <DashboardBootstrapProvider>
+      <DashboardLayoutContent>{children}</DashboardLayoutContent>
+    </DashboardBootstrapProvider>
+  );
+}
+
+function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const isLocalMock = useBrowserLocalMockApp();
   const { user, loading: authLoading } = useAuth();
+  const { bootstrap, loading: bootstrapLoading, refreshBootstrap } = useDashboardBootstrap();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -24,45 +32,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useLayoutEffect(() => {
     window.scrollTo(0, 0);
   }, [pathname]);
-  const [bizState, setBizState] = useState<{ loading: boolean; business: Business | null }>({
-    loading: true,
-    business: null,
-  });
-  const lastUserIdRef = useRef<string | undefined>(undefined);
+  const business = bootstrap?.business ?? null;
   const prevPathRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
   }, [authLoading, user, router]);
 
-  // Initial load when user id is known (does not re-run on every tab change).
-  useEffect(() => {
-    if (!user) {
-      lastUserIdRef.current = undefined;
-      return;
-    }
-    if (lastUserIdRef.current === user.id) return;
-    lastUserIdRef.current = user.id;
-
-    let active = true;
-    setBizState({ loading: true, business: null });
-    getMyBusiness()
-      .then((res) => {
-        if (!active) return;
-        setBizState({ loading: false, business: res.business });
-      })
-      .catch(() => {
-        if (!active) return;
-        setBizState({ loading: false, business: null });
-      });
-    return () => {
-      active = false;
-      // Remounts (e.g. React Strict Mode) can run again; allow a fresh fetch.
-      lastUserIdRef.current = undefined;
-    };
-  }, [user?.id]);
-
-  // When leaving the onboarding URL after save, refetch business once. Tab switches do not touch this.
+  // When leaving onboarding after save, force a one-time bootstrap refresh.
   useEffect(() => {
     if (!user) return;
     const from = prevPathRef.current;
@@ -71,29 +48,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (from == null) return;
     if (from !== ONBOARDING_PATH || to === ONBOARDING_PATH) return;
 
-    let active = true;
-    setBizState((s) => ({ ...s, loading: true }));
-    getMyBusiness()
-      .then((res) => {
-        if (!active) return;
-        setBizState({ loading: false, business: res.business });
-      })
-      .catch(() => {
-        if (!active) return;
-        setBizState((s) => ({ ...s, loading: false }));
-      });
-    return () => {
-      active = false;
-    };
-  }, [pathname, user?.id]);
+    void refreshBootstrap({ force: true });
+  }, [pathname, user?.id, refreshBootstrap]);
 
   useEffect(() => {
-    if (bizState.loading || !user) return;
+    if (bootstrapLoading || !user) return;
     const isOnboarding = pathname === ONBOARDING_PATH;
-    if (!bizState.business && !isOnboarding) {
+    if (!business && !isOnboarding) {
       router.replace(ONBOARDING_PATH);
     }
-  }, [bizState, user, pathname, router]);
+  }, [bootstrapLoading, business, user, pathname, router]);
 
   if (authLoading || !user) {
     return (
@@ -104,7 +68,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     );
   }
 
-  if (bizState.loading) {
+  if (bootstrapLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <DashboardDocumentTitle />
@@ -113,7 +77,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     );
   }
 
-  if (!bizState.business && pathname !== ONBOARDING_PATH) {
+  if (!business && pathname !== ONBOARDING_PATH) {
     return <DashboardDocumentTitle />;
   }
 
@@ -137,7 +101,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </p>
           </div>
         )}
-        {!isLocalMock && bizState.business?.is_sandbox && pathname !== ONBOARDING_PATH && (
+        {!isLocalMock && business?.is_sandbox && pathname !== ONBOARDING_PATH && (
           <div
             className="mb-5 rounded-xl border border-violet-200/80 bg-violet-50/90 px-4 py-3.5 sm:px-5 text-sm text-violet-950"
             role="status"

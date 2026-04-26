@@ -6,14 +6,14 @@ Next.js 14 + Tailwind dashboard and public surfaces for ReviewLoop.
 
 ```bash
 cp .env.example .env.local
-# edit .env.local — e.g. NEXT_PUBLIC_DEV=1, and either NEXT_PUBLIC_GOOGLE_CLIENT_ID or
-# NEXT_PUBLIC_MOCK_AUTH=1 with shared-backend DEV=1 for a no-Google test user
+# edit .env.local — set NEXT_PUBLIC_GOOGLE_CLIENT_ID (optional)
+# NEXT_PUBLIC_DEV=1 is only needed for non-`next dev` local-like builds
 npm install
 npm run dev
 # http://127.0.0.1:3001
 ```
 
-The backend must be running at http://127.0.0.1:8080 (see `shared-backend/`).
+The backend must be running at http://127.0.0.1:8000 (see `shared-backend/`).
 
 ## Routes
 

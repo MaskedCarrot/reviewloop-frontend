@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   enrollInSequenceBatched,
   fetchAllContactIdsMatching,
-  getSessionBootstrap,
   listCampaigns,
   listContacts,
   listSequences,
@@ -24,10 +23,12 @@ import AddPeopleDialog from "./AddPeopleDialog";
 import { ContactListStoreFilter } from "./ContactStoreSelects";
 import ContactsTable from "./ContactsTable";
 import ListStats from "./ListStats";
+import { useDashboardBootstrap } from "../../DashboardBootstrapProvider";
 
 const DEFAULT_PAGE_SIZE = 25;
 
 export default function PeopleWorkspace() {
+  const { bootstrap: sharedBootstrap, refreshBootstrap } = useDashboardBootstrap();
   const searchParams = useSearchParams();
   const router = useRouter();
   const isSendsTab = searchParams.get("tab") === "sends";
@@ -99,7 +100,7 @@ export default function PeopleWorkspace() {
           page: listPage,
           pageSize: listPageSize,
         }),
-        getSessionBootstrap().catch(() => null),
+        sharedBootstrap ? Promise.resolve(sharedBootstrap) : refreshBootstrap(),
         listCampaigns(),
         listSequences({ page: 1, pageSize: 2000, status: "all" }),
       ]);
@@ -125,7 +126,7 @@ export default function PeopleWorkspace() {
     } finally {
       setLoading(false);
     }
-  }, [searchQ, createdFrom, createdTo, listPage, listPageSize, listStoreId]);
+  }, [searchQ, createdFrom, createdTo, listPage, listPageSize, listStoreId, sharedBootstrap, refreshBootstrap]);
 
   const onToggleRow = useCallback((id: string) => {
     setRowSelected((s) => {

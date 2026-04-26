@@ -10,12 +10,12 @@ import {
   getMyBusiness,
   getMyCreditRates,
   getPublicConfig,
-  getSessionBootstrap,
   listCampaigns,
   listMyLocations,
   saveCampaign,
   deleteCampaign,
 } from "@/lib/api";
+import { useDashboardBootstrap } from "../DashboardBootstrapProvider";
 import ActiveReviewPlatformsStrip from "@/components/ActiveReviewPlatformsStrip";
 import DashboardPageHeader from "@/components/DashboardPageHeader";
 import InfoTip from "@/components/InfoTip";
@@ -239,6 +239,7 @@ function TemplateVariablesList({ idPrefix = "message" }: { idPrefix?: string }) 
 }
 
 export default function CampaignsPage() {
+  const { bootstrap } = useDashboardBootstrap();
   const [items, setItems] = useState<Campaign[]>([]);
   const [editing, setEditing] = useState<Campaign | null>(null);
   const [creating, setCreating] = useState(false);
@@ -263,7 +264,7 @@ export default function CampaignsPage() {
     try {
       const [c, boot, r] = await Promise.all([
         listCampaigns(),
-        getSessionBootstrap().catch(() => null),
+        Promise.resolve(bootstrap),
         getMyCreditRates().catch(() => null),
       ]);
       setItems(c.campaigns);
@@ -291,8 +292,8 @@ export default function CampaignsPage() {
   }
 
   useEffect(() => {
-    refresh();
-  }, []);
+    void refresh();
+  }, [bootstrap]);
 
   useLayoutEffect(() => {
     const elId = creating

@@ -7,12 +7,12 @@ import {
   getMyCreditRates,
   getMyBusiness,
   getPublicSendRatesByCountry,
-  getSessionBootstrap,
   patchCreditSettings,
   PUBLIC_SITE_ORIGIN,
   startSubscriptionCheckout,
   startTopUp,
 } from "@/lib/api";
+import { useDashboardBootstrap } from "../DashboardBootstrapProvider";
 import { shortDate } from "@/app/dashboard/contacts/_components/contactFormat";
 import SendRatesPanel from "@/components/credits/SendRatesPanel";
 import { ButtonSpinner, useAppToast } from "@/components/ToastProvider";
@@ -32,6 +32,7 @@ const PACKS = [
 const section = "app-section";
 
 export default function BillingPage() {
+  const { bootstrap, refreshBootstrap } = useDashboardBootstrap();
   const isLocalMock = useBrowserLocalMockApp();
   const [credits, setCredits] = useState<CreditState | null>(null);
   const [myRates, setMyRates] = useState<MyCreditRates | null>(null);
@@ -54,7 +55,7 @@ export default function BillingPage() {
   const refresh = useCallback(async () => {
     try {
       const [boot, r, m, s] = await Promise.all([
-        getSessionBootstrap().catch(() => null),
+        bootstrap ? Promise.resolve(bootstrap) : refreshBootstrap(),
         getMyCreditRates().catch(() => null),
         getMembershipOffers().catch(() => null),
         getPublicSendRatesByCountry().catch(() => null),

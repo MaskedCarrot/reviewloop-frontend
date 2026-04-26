@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useRef, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useGoogleLogin } from "@react-oauth/google";
-import { googleAuth, SHOW_MARKETING_TRY_DEMO, startServerSandboxSession } from "@/lib/api";
+import { GOOGLE_CLIENT_ID, googleAuth, SHOW_MARKETING_TRY_DEMO, startLocalDemoSession } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import MarketingHeader from "@/components/MarketingHeader";
 import Logo from "@/components/Logo";
 
-const hasGoogleClientId = !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+const hasGoogleClientId = !!GOOGLE_CLIENT_ID;
+
+console.log("GOOGLE_CLIENT_ID", GOOGLE_CLIENT_ID);
 
 function LoginIntro() {
   const sp = useSearchParams();
@@ -48,19 +50,11 @@ export default function LoginPage() {
   const wantsAutoDemo = useWantsAutoDemo();
   const autoTried = useRef(false);
 
-  const runDemo = useCallback(async () => {
+  const runDemo = useCallback(() => {
     if (!SHOW_MARKETING_TRY_DEMO) return;
-    setBusy(true);
-    setError("");
-    try {
-      const u = await startServerSandboxSession();
-      login(u);
-      router.replace("/dashboard");
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Could not start demo");
-    } finally {
-      setBusy(false);
-    }
+    const u = startLocalDemoSession();
+    login(u);
+    router.replace("/dashboard");
   }, [login, router]);
 
   useEffect(() => {

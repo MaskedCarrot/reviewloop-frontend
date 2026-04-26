@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 import type { User } from "@/types";
 import { LOCAL_DEMO_FLAG, TEST_USER_ID } from "@/lib/testMode/ids";
-import { getUser, isBrowserLocalMockApp } from "./api";
+import { getMe, isBrowserLocalMockApp } from "./api";
 
 interface AuthState {
   user: User | null;
@@ -33,7 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      const data = await getUser(id);
+      const data = await getMe();
       if (data.id && isBrowserLocalMockApp() && data.id !== id) {
         localStorage.setItem("user_id", data.id);
       }

@@ -274,6 +274,8 @@ export interface SessionBootstrap {
   ingest_presets: IngestPresets;
   /** IANA name for display; matches business profile timezone. */
   display_timezone: string;
+  /** Server-resolved send costs for the current business; null before a business is created. */
+  credit_rates: MyCreditRates | null;
 }
 
 export interface ReviewPlatformInfo {

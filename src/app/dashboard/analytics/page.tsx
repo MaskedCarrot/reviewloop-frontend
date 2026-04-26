@@ -16,13 +16,14 @@ import {
   YAxis,
 } from "recharts";
 import ActiveReviewPlatformsStrip from "@/components/ActiveReviewPlatformsStrip";
-import { getCredits, getDashboardStats, getMyCreditRates, getPublicConfig, listMyLocations } from "@/lib/api";
+import { getDashboardStats } from "@/lib/api";
 import { activePlatformChips } from "@/lib/reviewPlatformsFromLocations";
 import DashboardPageHeader from "@/components/DashboardPageHeader";
 import AnalyticsPageSkeleton from "@/components/skeletons/AnalyticsPageSkeleton";
 import ImpactOverviewChart from "@/components/ImpactOverviewChart";
 import StyledSelect from "@/components/StyledSelect";
-import type { BusinessLocation, CreditState, DashboardStats, MyCreditRates, PublicConfig } from "@/types";
+import { useDashboardBootstrap } from "../DashboardBootstrapProvider";
+import type { DashboardStats } from "@/types";
 
 const PIE_COLORS = { email: "#0ea5e9", sms: "#8b5cf6" };
 
@@ -43,33 +44,25 @@ function pct(n: number, d: number): string {
 }
 
 export default function AnalyticsPage() {
+  const { bootstrap } = useDashboardBootstrap();
   const [days, setDays] = useState(30);
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [credits, setCredits] = useState<CreditState | null>(null);
-  const [publicCfg, setPublicCfg] = useState<PublicConfig | null>(null);
-  const [myRates, setMyRates] = useState<MyCreditRates | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [locations, setLocations] = useState<BusinessLocation[]>([]);
+
+  const credits = bootstrap?.credits ?? null;
+  const publicCfg = bootstrap?.config ?? null;
+  const myRates = bootstrap?.credit_rates ?? null;
+  const locations = bootstrap?.locations?.locations ?? [];
 
   useEffect(() => {
     let live = true;
     setError("");
     setLoading(true);
-    Promise.all([
-      getDashboardStats(days),
-      getCredits(),
-      getPublicConfig(),
-      getMyCreditRates().catch(() => null),
-      listMyLocations().catch(() => ({ locations: [] as BusinessLocation[], default_location_id: null as string | null })),
-    ])
-      .then(([s, c, p, r, locs]) => {
+    getDashboardStats(days)
+      .then((s) => {
         if (!live) return;
         setStats(s);
-        setCredits(c);
-        setPublicCfg(p);
-        setMyRates(r);
-        setLocations(locs.locations);
       })
       .catch((e) => {
         if (live) setError(e instanceof Error ? e.message : "Could not load analytics");

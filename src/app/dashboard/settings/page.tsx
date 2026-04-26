@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   deleteAccount,
   getDataExportBundle,
-  getSessionBootstrap,
   saveMyBusiness,
 } from "@/lib/api";
 import { useBrowserLocalMockApp } from "@/lib/useBrowserLocalMockApp";
@@ -18,6 +17,7 @@ import InfoTip from "@/components/InfoTip";
 import { ButtonSpinner, useAppToast } from "@/components/ToastProvider";
 import SettingsPageSkeleton from "@/components/skeletons/SettingsPageSkeleton";
 import LocationSettingsBlock from "./LocationSettingsBlock";
+import { useDashboardBootstrap } from "../DashboardBootstrapProvider";
 
 const NAV = [
   { id: "business", label: "Profile" },
@@ -109,6 +109,7 @@ function IconAlert() {
 }
 
 export default function SettingsPage() {
+  const { bootstrap, refreshBootstrap, mutateBootstrap } = useDashboardBootstrap();
   const isLocalMock = useBrowserLocalMockApp();
   const { logout } = useAuth();
   const router = useRouter();
@@ -120,14 +121,14 @@ export default function SettingsPage() {
   const [creditBalance, setCreditBalance] = useState<number | undefined>(undefined);
 
   useEffect(() => {
-    getSessionBootstrap()
-      .then((s) => {
-        setBiz(s.business);
-        setCfg(s.config);
-        setCreditBalance(s.credits?.balance);
-      })
-      .catch(() => {});
-  }, []);
+    if (!bootstrap) {
+      void refreshBootstrap();
+      return;
+    }
+    setBiz(bootstrap.business);
+    setCfg(bootstrap.config);
+    setCreditBalance(bootstrap.credits?.balance);
+  }, [bootstrap, refreshBootstrap]);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -166,6 +167,7 @@ export default function SettingsPage() {
         branding_color: biz.branding_color,
       });
       setBiz(res.business);
+      mutateBootstrap((prev) => (prev ? { ...prev, business: res.business } : prev));
       toast.success("Settings saved");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not save settings");
@@ -422,7 +424,13 @@ export default function SettingsPage() {
           </div>
         )}
 
-        <LocationSettingsBlock publicConfig={cfg} onBusinessRefresh={(r) => setBiz(r.business)} />
+        <LocationSettingsBlock
+          publicConfig={cfg}
+          onBusinessRefresh={(r) => {
+            setBiz(r.business);
+            mutateBootstrap((prev) => (prev ? { ...prev, business: r.business } : prev));
+          }}
+        />
 
         <div className="sm:sticky sm:bottom-4 z-10">
           <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/80 shadow-[0_-8px_32px_-12px_rgba(15,23,42,0.12),0_1px_0_rgba(15,23,42,0.04)] backdrop-blur supports-[backdrop-filter]:bg-white/70">

@@ -25,7 +25,7 @@ import type {
   User,
   WebhookKeyRecord,
 } from "@/types";
-import { LOCAL_DEMO_FLAG } from "@/lib/testMode/ids";
+import { LOCAL_DEMO_FLAG, TEST_USER_ID } from "@/lib/testMode/ids";
 import { runTestModeCsvUpload } from "@/lib/testMode/dispatch";
 import { getTestModeQrPngBlob, getTestModeQrSvgBlob } from "@/lib/testMode/qrImage";
 import { API_BASE } from "./config";
@@ -36,14 +36,14 @@ export async function googleAuth(code: string) {
     "/api/auth/google",
     {
       method: "POST",
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code, product: "reviewloop" }),
     },
     { auth: false },
   );
 }
 
-export async function getUser(userId: string) {
-  return request<User>(`/api/users/${userId}`);
+export async function getMe() {
+  return request<User>("/api/reviewloop/me");
 }
 
 export async function getPublicConfig() {
@@ -93,6 +93,14 @@ export async function startServerSandboxSession(): Promise<User> {
     localStorage.setItem("user_id", r.user.id);
   }
   return r.user;
+}
+
+export function startLocalDemoSession(): User {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(LOCAL_DEMO_FLAG, "1");
+    localStorage.setItem("user_id", TEST_USER_ID);
+  }
+  return { id: TEST_USER_ID, email: "demo@reviewloop.app", name: "Demo user", picture_url: null };
 }
 
 export async function getMyBusiness() {
