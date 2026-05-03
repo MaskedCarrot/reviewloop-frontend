@@ -44,13 +44,30 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           <div
             key={t.id}
             role="status"
-            className={`pointer-events-auto max-w-md rounded-xl border px-4 py-2.5 text-sm font-medium shadow-lg backdrop-blur-sm transition ${
+            className={`pointer-events-auto flex max-w-md items-start gap-3 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-card-hover backdrop-blur-sm transition animate-fade-in ${
               t.kind === "success"
-                ? "border-emerald-200/90 bg-emerald-50/95 text-emerald-950 ring-1 ring-inset ring-emerald-200/50"
-                : "border-red-200/90 bg-red-50/95 text-red-900 ring-1 ring-inset ring-red-200/50"
+                ? "border-emerald-200 bg-emerald-50/95 text-emerald-950"
+                : "border-red-200 bg-red-50/95 text-red-900"
             }`}
           >
-            {t.message}
+            <span
+              className={`grid h-6 w-6 shrink-0 place-items-center rounded-full ${
+                t.kind === "success" ? "bg-emerald-200/60 text-emerald-800" : "bg-red-200/60 text-red-800"
+              }`}
+              aria-hidden
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" className="h-3.5 w-3.5">
+                {t.kind === "success" ? (
+                  <path d="M5 12l5 5 9-11" strokeLinecap="round" strokeLinejoin="round" />
+                ) : (
+                  <>
+                    <circle cx="12" cy="12" r="9" strokeWidth="1.8" />
+                    <path d="M9 9l6 6M15 9l-6 6" strokeLinecap="round" />
+                  </>
+                )}
+              </svg>
+            </span>
+            <span className="pt-0.5">{t.message}</span>
           </div>
         ))}
       </div>

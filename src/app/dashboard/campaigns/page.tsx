@@ -1,71 +1,38 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { createSequence, listCampaigns, listSequences } from "@/lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { listCampaigns, listContacts } from "@/lib/api";
 import { useDashboardBootstrap } from "../DashboardBootstrapProvider";
-import { shortDate } from "@/app/dashboard/contacts/_components/contactFormat";
-import EnrollInCampaignDialog from "@/app/dashboard/contacts/_components/EnrollInCampaignDialog";
-import ActiveReviewPlatformsStrip from "@/components/ActiveReviewPlatformsStrip";
 import DashboardPageHeader from "@/components/DashboardPageHeader";
-import InfoTip from "@/components/InfoTip";
-import { ButtonSpinner, useAppToast } from "@/components/ToastProvider";
 import PageLoader from "@/components/PageLoader";
-import { countrySupportsSms, getSmsSupportedList } from "@/lib/countryUi";
-import { activePlatformChips } from "@/lib/reviewPlatformsFromLocations";
-import type {
-  Business,
-  BusinessLocation,
-  Campaign,
-  PublicConfig,
-  ReviewSequence,
-  ReviewSequenceLinkStyle,
-  ReviewSequenceListStatus,
-} from "@/types";
+import Disclosure from "@/components/Disclosure";
+import EmptyState from "@/components/EmptyState";
+import UsageMeter from "@/components/UsageMeter";
+import { useAppToast } from "@/components/ToastProvider";
+import NewCampaignWizard from "./_components/NewCampaignWizard";
+import { campaignStatusTone } from "./_lib/campaignUi";
+import type { Campaign, CampaignStatus } from "@/types";
 
 const PAGE_SIZE = 20;
 
-function listStatusLabel(s: ReviewSequenceListStatus) {
-  if (s === "running") return "Running";
-  if (s === "paused") return "Paused";
-  return "Completed";
-}
-
-function listStatusPillClass(s: ReviewSequenceListStatus) {
-  if (s === "running") return "bg-emerald-100 text-emerald-900";
-  if (s === "paused") return "bg-amber-100 text-amber-900";
-  return "bg-slate-200 text-slate-700";
-}
-
 export default function ActiveCampaignsPage() {
   const { bootstrap: sharedBootstrap, refreshBootstrap } = useDashboardBootstrap();
-  const [items, setItems] = useState<ReviewSequence[]>([]);
+  const [items, setItems] = useState<Campaign[]>([]);
   const [listTotal, setListTotal] = useState(0);
   const [listPage, setListPage] = useState(1);
   const [listQ, setListQ] = useState("");
   const [listQDeb, setListQDeb] = useState("");
-  const [listStatus, setListStatus] = useState<"all" | "running" | "paused" | "completed">("all");
+  const [listStatus, setListStatus] = useState<"all" | CampaignStatus>("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
-  const [templates, setTemplates] = useState<Campaign[]>([]);
   const [credits, setCredits] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [listLoading, setListLoading] = useState(true);
-  const [biz, setBiz] = useState<Business | null>(null);
-  const [cfg, setCfg] = useState<PublicConfig | null>(null);
-  const [locations, setLocations] = useState<BusinessLocation[]>([]);
-  const [editing, setEditing] = useState<"new" | null>(null);
-  const [enrollFor, setEnrollFor] = useState<string | null>(null);
-  const [formName, setFormName] = useState("Review campaign");
-  const [formActive, setFormActive] = useState(true);
-  const [formSteps, setFormSteps] = useState<
-    { campaign_id: string; delay_after_previous_minutes: number }[]
-  >([{ campaign_id: "", delay_after_previous_minutes: 60 }]);
-  const [formLocationId, setFormLocationId] = useState<string>("");
-  const [formLinkStyle, setFormLinkStyle] = useState<ReviewSequenceLinkStyle>("hosted");
-  const [saving, setSaving] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [listTick, setListTick] = useState(0);
-  const [displayTimeZone, setDisplayTimeZone] = useState("UTC");
+  const [contactsTotal, setContactsTotal] = useState<number | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const toast = useAppToast();
 
   useEffect(() => {
@@ -77,429 +44,281 @@ export default function ActiveCampaignsPage() {
     setListPage(1);
   }, [listQDeb, listStatus, fromDate, toDate]);
 
-  const bootstrap = useCallback(async () => {
+  const bootstrapData = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, boot] = await Promise.all([listCampaigns(), sharedBootstrap ? Promise.resolve(sharedBootstrap) : refreshBootstrap()]);
+      const boot = sharedBootstrap ?? (await refreshBootstrap());
       if (!boot) return;
-      setTemplates(c.campaigns);
-      setBiz(boot.business);
-      setCfg(boot.config);
       setCredits(boot.credits?.balance ?? 0);
-      setLocations(boot.locations?.locations ?? []);
-      setDisplayTimeZone(boot.display_timezone || boot.business?.timezone || "UTC");
+      try {
+        const c = await listContacts({ page: 1, pageSize: 1 });
+        setContactsTotal(c.total);
+      } catch {
+        setContactsTotal(0);
+      }
     } finally {
       setLoading(false);
     }
   }, [sharedBootstrap, refreshBootstrap]);
 
-  const loadSequences = useCallback(async () => {
+  const loadCampaigns = useCallback(async () => {
     setListLoading(true);
+    setLoadError(null);
     try {
-      const s = await listSequences({
+      const s = await listCampaigns({
         page: listPage,
         pageSize: PAGE_SIZE,
         q: listQDeb.trim() || undefined,
-        status: listStatus,
+        status: listStatus === "all" ? undefined : listStatus,
         from: fromDate || undefined,
         to: toDate || undefined,
       });
-      setItems(s.sequences);
+      setItems(s.campaigns);
       setListTotal(s.total);
-    } catch {
+    } catch (err) {
+      // Surface a real message instead of silently showing "no campaigns".
+      const msg = err instanceof Error ? err.message : "Could not load campaigns.";
+      setLoadError(msg);
       setItems([]);
       setListTotal(0);
+      toast.error(msg);
     } finally {
       setListLoading(false);
     }
+    // toast is stable from the provider; intentionally omitted from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listPage, listQDeb, listStatus, fromDate, toDate, listTick]);
 
   useEffect(() => {
-    void bootstrap();
-  }, [bootstrap]);
-
+    void bootstrapData();
+  }, [bootstrapData]);
   useEffect(() => {
-    void loadSequences();
-  }, [loadSequences]);
+    void loadCampaigns();
+  }, [loadCampaigns]);
 
-  function newCampaign() {
-    setEditing("new");
-    setFormName("New campaign");
-    setFormActive(true);
-    setFormLinkStyle("hosted");
-    const fromDefault = biz?.default_location_id
-      ? locations.find((l) => l.id === biz.default_location_id)
-      : null;
-    const def = fromDefault || locations[0] || null;
-    setFormLocationId(def?.id || "");
-    setFormSteps([{ campaign_id: templates[0]?.id || "", delay_after_previous_minutes: 60 }]);
-  }
-
-  async function submitForm(e: React.FormEvent) {
-    e.preventDefault();
-    if (!formName.trim()) {
-      toast.error("Campaign name is required.");
-      return;
-    }
-    if (formSteps.length === 0) {
-      toast.error("Add at least one step to the campaign.");
-      return;
-    }
-    for (const st of formSteps) {
-      if (!st.campaign_id) {
-        toast.error("Pick a message template for every step.");
-        return;
-      }
-    }
-    const loc = formLocationId.trim() || null;
-    if ((formLinkStyle === "direct_google" || formLinkStyle === "direct_yelp") && !loc) {
-      toast.error(
-        "Pick a store for this campaign to use a direct Google or Yelp link, or use the single Review page link style.",
-      );
-      return;
-    }
-    setSaving(true);
-    try {
-      const payload = {
-        name: formName.trim(),
-        is_active: formActive,
-        location_id: loc,
-        review_link_style: formLinkStyle,
-        steps: formSteps.map((s) => ({ ...s })),
-      };
-      await createSequence(payload);
-      setEditing(null);
-      setListPage(1);
-      setListQ("");
-      setListQDeb("");
-      setListStatus("all");
-      setFromDate("");
-      setToDate("");
-      setListTick((t) => t + 1);
-      toast.success("Campaign created");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not create campaign");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const sms = !!biz && (cfg ? countrySupportsSms(biz.country_code, getSmsSupportedList(cfg)) : true);
-  const platformChips = useMemo(() => activePlatformChips(locations, cfg), [locations, cfg]);
-  const enrollCampaignName = enrollFor ? items.find((c) => c.id === enrollFor)?.name || "Campaign" : "";
-  const hasListFilters = Boolean(listQDeb.trim() || fromDate || toDate || listStatus !== "all");
+  const hasListFilters = Boolean(
+    listQDeb.trim() || fromDate || toDate || listStatus !== "all",
+  );
   const startRow = listTotal === 0 ? 0 : (listPage - 1) * PAGE_SIZE + 1;
   const endRow = (listPage - 1) * PAGE_SIZE + items.length;
   const canPrev = listPage > 1;
   const canNext = listPage * PAGE_SIZE < listTotal;
 
+  // Plan / usage gating. ``usage.limits.campaigns_per_month === null`` means the
+  // user is on Pro — no cap, button stays enabled. We branch on the limit being
+  // a finite number rather than the plan key directly so any future tiers (e.g.
+  // an enterprise plan with a different cap) just work.
+  const usage = sharedBootstrap?.usage;
+  const campaignsLimit = usage?.limits?.campaigns_per_month ?? null;
+  const campaignsUsed = usage?.used?.campaigns_this_month ?? 0;
+  const atCampaignCap =
+    campaignsLimit !== null && campaignsUsed >= campaignsLimit;
+  const noContacts = contactsTotal === 0;
+  const cannotCreate = atCampaignCap || noContacts;
+
   return (
     <div className="space-y-6 w-full min-w-0">
       <DashboardPageHeader
-        eyebrow="Follow-ups"
+        eyebrow="Automated follow-ups"
         title="Campaigns"
         credits={credits != null ? credits : undefined}
-        description={
-          <p className="line-clamp-2">
-            Set up a sequence once, then use the detail view to see progress. After a campaign is created, it can't
-            be edited or deleted; you can <strong>pause</strong> it to block new people and new follow-up steps
-            (what's already scheduled will still send).
-          </p>
-        }
-        info={{
-          label: "Follow-up rules",
-          size: "md",
-          children: (
-            <p>
-              A campaign is built from your{" "}
-              <Link href="/dashboard/templates" className="font-medium text-brand-600 hover:underline">
-                message templates
-              </Link>
-              . Open any campaign to see people, step counts, replies, and scheduled sends. Pausing does not remove
-              pending sends. Use{" "}
-              <Link href="/dashboard/analytics" className="font-medium text-brand-600 hover:underline">
-                Analytics
-              </Link>{" "}
-              for deeper history.
-            </p>
-          ),
-        }}
+        description="Set up a message sequence once and it runs automatically."
         end={
-          <button type="button" onClick={newCampaign} className="btn-primary shrink-0 w-full sm:w-fit min-h-10">
+          <button
+            type="button"
+            onClick={() => setWizardOpen(true)}
+            disabled={cannotCreate}
+            title={
+              atCampaignCap
+                ? `Free plan limit reached: ${campaignsLimit} campaigns / month. Upgrade to Pro for unlimited.`
+                : noContacts
+                  ? "Add at least one contact in People before creating a campaign."
+                  : undefined
+            }
+            className="btn-warm shrink-0 w-full sm:w-fit min-h-10 px-5 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
             New campaign
           </button>
         }
       />
 
-      {cfg && <ActiveReviewPlatformsStrip platforms={platformChips} className="max-w-3xl" />}
+      {/* Free-plan usage meter. Hidden for Pro users (limit === null). */}
+      {!loading && (
+        <UsageMeter
+          label="Campaigns this month"
+          used={campaignsUsed}
+          limit={campaignsLimit}
+          hint={
+            campaignsLimit !== null
+              ? `Free plan: ${campaignsLimit} campaigns / month. Resets on the 1st.`
+              : undefined
+          }
+        />
+      )}
 
-      <div
-        className="flex items-center gap-2 overflow-visible rounded-xl border border-amber-200/80 bg-amber-50/50 px-3 py-2.5 sm:px-4 text-amber-950/90"
-        role="status"
-      >
-        <p className="text-sm font-medium min-w-0">Open a campaign for the full picture — steps, people, and outcomes.</p>
-        <InfoTip label="Pause and scheduling" size="md">
-          <p>
-            "Pause" turns off the campaign: no new enrollments and we won't schedule the next follow-up for anyone. Any
-            email/SMS rows that are already scheduled in the system will still be delivered. You can resume later; you
-            still can't change the message steps once created.
+      {!loading && noContacts && (
+        <div className="rounded-2xl border border-warm-200 bg-warm-50/60 px-4 py-3 sm:px-5 sm:py-4 text-sm text-warm-900 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="leading-relaxed">
+            <strong className="font-semibold">Add some people first.</strong> Campaigns need at least
+            one contact to enrol — head to{" "}
+            <Link href="/dashboard/contacts" className="font-semibold underline">
+              People
+            </Link>{" "}
+            to add or import them.
           </p>
-        </InfoTip>
-      </div>
+          <Link
+            href="/dashboard/contacts"
+            className="btn-warm h-9 px-4 text-sm shrink-0 w-full sm:w-auto justify-center"
+          >
+            Open People
+          </Link>
+        </div>
+      )}
 
-      {!loading && !editing && (
-        <div className="card p-4 space-y-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:gap-x-4 sm:gap-y-2">
-            <div className="min-w-0 sm:flex-1 sm:max-w-xs">
-              <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500" htmlFor="cmp-q">
-                Name
+      {/* Filters — search + status as primary, dates collapsed */}
+      {!loading && (
+        <div className="space-y-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="min-w-0 sm:flex-1 sm:max-w-md">
+              <label className="label" htmlFor="cmp-q">
+                Search
               </label>
               <input
                 id="cmp-q"
-                className="input mt-0.5 w-full h-9 text-sm"
-                placeholder="Search by campaign name…"
+                className="input h-10 text-sm"
+                placeholder="Search campaigns by name…"
                 value={listQ}
                 onChange={(e) => setListQ(e.target.value)}
               />
             </div>
-            <div>
-              <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500" htmlFor="cmp-status">
+            <div className="sm:w-48">
+              <label className="label" htmlFor="cmp-status">
                 Status
               </label>
               <select
                 id="cmp-status"
-                className="input mt-0.5 w-full h-9 text-sm min-w-[160px]"
+                className="input h-10 text-sm w-full"
                 value={listStatus}
-                onChange={(e) => setListStatus(e.target.value as "all" | "running" | "paused" | "completed")}
+                onChange={(e) => setListStatus(e.target.value as "all" | CampaignStatus)}
               >
-                <option value="all">All</option>
+                <option value="all">All statuses</option>
+                <option value="scheduled">Scheduled</option>
                 <option value="running">Running</option>
-                <option value="paused">Paused (people in progress)</option>
-                <option value="completed">Off &amp; idle</option>
+                <option value="paused">Paused</option>
+                <option value="finished">Finished</option>
               </select>
             </div>
-            <div>
-              <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500 block">Created (your time zone)</span>
-              <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                <input
-                  type="date"
-                  className="input h-9 text-sm w-full sm:w-auto"
-                  value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                  aria-label="Created on or after"
-                />
-                <span className="text-slate-400">–</span>
-                <input
-                  type="date"
-                  className="input h-9 text-sm w-full sm:w-auto"
-                  value={toDate}
-                  onChange={(e) => setToDate(e.target.value)}
-                  aria-label="Created on or before"
-                />
-              </div>
-            </div>
-            {hasListFilters && (
-              <div className="sm:ml-auto">
+          </div>
+
+          <Disclosure
+            label="Filter by date created"
+            hint={fromDate || toDate ? `${fromDate || "any"} → ${toDate || "any"}` : undefined}
+            defaultOpen={Boolean(fromDate || toDate)}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="date"
+                className="input h-10 text-sm"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                aria-label="From"
+              />
+              <span className="text-slate-400">–</span>
+              <input
+                type="date"
+                className="input h-10 text-sm"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                aria-label="To"
+              />
+              {fromDate || toDate ? (
                 <button
                   type="button"
-                  className="btn-ghost text-sm h-9"
+                  className="btn-ghost text-sm h-10"
                   onClick={() => {
-                    setListQ("");
-                    setListQDeb("");
-                    setListStatus("all");
                     setFromDate("");
                     setToDate("");
-                    setListPage(1);
                   }}
                 >
-                  Clear filters
+                  Clear
                 </button>
-              </div>
-            )}
-          </div>
-          <p className="text-xs text-slate-500">
-            <strong>Running</strong> is on. <strong>Paused</strong> is off with people still in the sequence.{" "}
-            <strong>Off &amp; idle</strong> is off and nobody in progress. The date range uses calendar days in your business
-            time zone (from Settings), matching when each campaign was created.
-          </p>
-        </div>
-      )}
+              ) : null}
+            </div>
+          </Disclosure>
 
-      {editing && (
-        <form onSubmit={submitForm} className="card p-5 space-y-4">
-          <h2 className="text-lg font-semibold text-slate-900">New campaign</h2>
-          <p className="text-sm text-slate-600">You can't change steps or the store link mode after you save. Pause the campaign if you need to prevent new work.</p>
-          <div>
-            <label className="label">Name</label>
-            <input
-              className="input"
-              value={formName}
-              onChange={(e) => setFormName(e.target.value)}
-              required
-            />
-          </div>
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" checked={formActive} onChange={(e) => setFormActive(e.target.checked)} />
-            Start as running (you can pause from the campaign page later)
-          </label>
-          <div className="space-y-2">
-            <label className="label">Store (review links)</label>
-            <p className="text-xs text-slate-500 -mt-0.5">
-              This follow-up only uses the Google / Yelp (and other) links for the store you select. Configure stores
-              under <Link href="/dashboard/settings" className="text-brand-600 font-medium hover:underline">Settings</Link>.
-            </p>
-            <select
-              className="input"
-              value={formLocationId}
-              onChange={(e) => setFormLocationId(e.target.value)}
-            >
-              <option value="">Auto (template or contact, then your default store)</option>
-              {locations.map((loc) => (
-                <option key={loc.id} value={loc.id}>
-                  {loc.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-2">
-            <label className="label">What goes in <code className="text-xs bg-slate-100 px-1 rounded">{"{link}"}</code> in your templates</label>
-            <select
-              className="input"
-              value={formLinkStyle}
-              onChange={(e) => setFormLinkStyle(e.target.value as ReviewSequenceLinkStyle)}
-            >
-              <option value="hosted">Review page (all options, private feedback) — default</option>
-              <option value="direct_google">One-tap: Google (tracked) for this store</option>
-              <option value="direct_yelp">One-tap: Yelp (tracked) for this store</option>
-            </select>
-            <p className="text-xs text-slate-500">
-              You can also use <code className="bg-slate-100 px-0.5 rounded">{"{link_google}"}</code> and{" "}
-              <code className="bg-slate-100 px-0.5 rounded">{"{link_yelp}"}</code> in a template. Direct links and the
-              Review page are chosen when the message is sent, using the store above.
-            </p>
-            {(formLinkStyle === "direct_google" || formLinkStyle === "direct_yelp") && !formLocationId.trim() && (
-              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
-                Choose a store above so we know which Google or Yelp link to use.
-              </p>
-            )}
-          </div>
-          <div className="space-y-3">
-            <p className="text-sm font-medium text-slate-800">Steps (order = send order)</p>
-            {formSteps.map((s, i) => (
-              <div
-                key={i}
-                className="flex flex-col sm:flex-row gap-2 sm:items-end rounded-lg border border-slate-200 p-3 bg-slate-50/50"
-              >
-                <div className="flex-1 min-w-0">
-                  <span className="text-xs text-slate-500">Template {i + 1} (email or SMS)</span>
-                  <select
-                    className="input mt-1"
-                    value={s.campaign_id}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setFormSteps((prev) => {
-                        const n = [...prev];
-                        n[i] = { ...n[i], campaign_id: v };
-                        return n;
-                      });
-                    }}
-                    required
-                  >
-                    <option value="" disabled>
-                      Select template…
-                    </option>
-                    {templates
-                      .filter((t) => t.channel === "email" || (t.channel === "sms" && sms))
-                      .map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name} ({t.channel})
-                        </option>
-                      ))}
-                  </select>
-                </div>
-                <div className="w-full sm:w-32">
-                  <span className="text-xs text-slate-500">
-                    {i === 0 ? "First send in (min)" : "Then after (min)"}
-                  </span>
-                  <input
-                    type="number"
-                    className="input mt-1"
-                    min={0}
-                    max={20160}
-                    value={s.delay_after_previous_minutes}
-                    onChange={(e) => {
-                      const n = Number(e.target.value) || 0;
-                      setFormSteps((prev) => {
-                        const a = [...prev];
-                        a[i] = { ...a[i], delay_after_previous_minutes: n };
-                        return a;
-                      });
-                    }}
-                  />
-                </div>
-                {formSteps.length > 1 && (
-                  <button
-                    type="button"
-                    className="text-sm text-red-600 h-9"
-                    onClick={() => setFormSteps((prev) => prev.filter((_, j) => j !== i))}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
-            {formSteps.length < 8 && (
-              <button
-                type="button"
-                className="text-sm text-brand-700 font-medium"
-                onClick={() => setFormSteps((p) => [...p, { campaign_id: "", delay_after_previous_minutes: 1440 }])}
-              >
-                + Add follow-up step
-              </button>
-            )}
-          </div>
-          <div className="flex gap-2 justify-end">
+          {hasListFilters ? (
             <button
               type="button"
-              className="btn-ghost"
+              className="text-sm font-semibold text-slate-600 hover:text-slate-900"
               onClick={() => {
-                setEditing(null);
+                setListQ("");
+                setListQDeb("");
+                setListStatus("all");
+                setFromDate("");
+                setToDate("");
+                setListPage(1);
               }}
             >
-              Cancel
+              Clear all filters
             </button>
-            <button
-              type="submit"
-              className="btn-primary inline-flex items-center justify-center gap-2"
-              disabled={saving || templates.length === 0}
-            >
-              {saving ? (
-                <>
-                  <ButtonSpinner />
-                  Creating…
-                </>
-              ) : (
-                "Create campaign"
-              )}
-            </button>
-          </div>
-        </form>
+          ) : null}
+        </div>
       )}
 
       {loading ? (
-        <div className="card p-12">
+        <div className="app-section py-12">
           <PageLoader message="Loading campaigns" size="md" />
         </div>
-      ) : listTotal === 0 && !hasListFilters && !editing && !listLoading ? (
-        <div className="card p-8 text-sm text-slate-600 text-center">
-          No campaigns yet. Create message templates, then a multi-step campaign. Open a campaign to see details, or
-          <Link className="text-brand-600 font-medium mx-1" href="/dashboard/contacts">enroll from People</Link> when
-          a campaign is running.
-        </div>
-      ) : !editing ? (
-        <div className="space-y-3">
-          {listTotal === 0 && hasListFilters && !listLoading ? (
-            <div className="card p-6 text-sm text-slate-600 text-center">No campaigns match your filters. Try a different name, status, or date range.</div>
+      ) : listTotal === 0 && !hasListFilters && !listLoading ? (
+        <EmptyState
+          tone="warm"
+          icon={
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-7 w-7" aria-hidden>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3.75 6.75A1.5 1.5 0 015.25 5.25h13.5a1.5 1.5 0 011.5 1.5v10.5a1.5 1.5 0 01-1.5 1.5H5.25a1.5 1.5 0 01-1.5-1.5V6.75z"
+              />
+              <path strokeLinecap="round" d="M3.75 9.75h16.5" />
+            </svg>
+          }
+          title="No campaigns yet"
+          body="Create your message templates first, then set up an automated follow-up sequence. We'll handle the timing."
+          actions={
+            <>
+              <button type="button" className="btn-warm" onClick={() => setWizardOpen(true)}>
+                New campaign
+              </button>
+              <Link href="/dashboard/templates" className="btn-secondary">
+                Go to Templates
+              </Link>
+            </>
+          }
+        />
+      ) : (
+        <div className="space-y-4">
+          {loadError && !listLoading ? (
+            <div
+              role="alert"
+              className="card border-red-200 bg-red-50/70 p-4 text-sm text-red-900"
+            >
+              <div className="font-semibold">Could not load campaigns</div>
+              <div className="mt-1 opacity-80">{loadError}</div>
+              <button
+                type="button"
+                onClick={() => setListTick((t) => t + 1)}
+                className="btn btn-secondary mt-3 px-3 py-1.5 text-xs"
+              >
+                Try again
+              </button>
+            </div>
+          ) : null}
+          {listTotal === 0 && hasListFilters && !listLoading && !loadError ? (
+            <EmptyState
+              tone="muted"
+              title="No campaigns match your filters"
+              body="Try widening the date range or clearing search."
+            />
           ) : null}
           {listLoading && !loading ? (
             <div className="card p-6">
@@ -508,67 +327,17 @@ export default function ActiveCampaignsPage() {
           ) : null}
           {!listLoading && listTotal > 0 ? (
             <>
-              <ul className="space-y-3" role="list" aria-busy={listLoading}>
+              <ul className="grid gap-3" role="list">
                 {items.map((c) => {
                   const hrefId = String(c.id).trim();
                   if (!hrefId) return null;
                   const href = `/dashboard/campaigns/${encodeURIComponent(hrefId)}`;
-                  const ls: ReviewSequenceListStatus =
-                    c.list_status ?? (c.is_active ? "running" : c.active_enrollments > 0 ? "paused" : "completed");
-                  return (
-                    <li key={c.id} className="card p-4">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 min-w-0">
-                        <Link
-                          href={href}
-                          prefetch={false}
-                          className="group min-w-0 flex flex-1 sm:flex-row sm:items-center sm:justify-between gap-3 -m-1 p-1 rounded-xl text-left
-                            focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/50 focus-visible:ring-offset-2
-                            sm:-m-0 sm:p-0 sm:rounded-none sm:focus-visible:ring-0 sm:focus-visible:ring-offset-0"
-                        >
-                          <div className="min-w-0 sm:flex-1 sm:pr-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-semibold text-slate-900 text-lg group-hover:text-brand-800 group-hover:underline">
-                                {c.name}
-                              </span>
-                              <span className={`pill ${listStatusPillClass(ls)}`}>{listStatusLabel(ls)}</span>
-                            </div>
-                            <p className="text-sm text-slate-600 mt-0.5">
-                              {c.step_count} step{c.step_count === 1 ? "" : "s"} · {c.active_enrollments} in progress
-                              {c.review_link_style && c.review_link_style !== "hosted" && (
-                                <span>
-                                  {" "}
-                                  · {c.review_link_style === "direct_google" ? "Link: Google" : c.review_link_style === "direct_yelp" ? "Link: Yelp" : null}
-                                </span>
-                              )}
-                              {c.created_at && (
-                                <span className="text-slate-500">
-                                  {" "}
-                                  · created {shortDate(c.created_at, displayTimeZone)}
-                                </span>
-                              )}
-                            </p>
-                          </div>
-                          <span className="inline-flex shrink-0 self-start sm:self-center items-center btn-primary text-sm w-fit">
-                            Open
-                          </span>
-                        </Link>
-                        {c.is_active && (
-                          <button
-                            type="button"
-                            className="btn-secondary text-sm shrink-0 self-start sm:self-center"
-                            onClick={() => setEnrollFor(c.id === enrollFor ? null : c.id)}
-                          >
-                            Add people
-                          </button>
-                        )}
-                      </div>
-                    </li>
-                  );
+                  return <CampaignRow key={c.id} c={c} href={href} />;
                 })}
               </ul>
               {listTotal > 0 && (
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-slate-600">
-                  <p>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-slate-700 pt-1">
+                  <p className="font-medium">
                     Showing {startRow}–{endRow} of {listTotal.toLocaleString()}
                   </p>
                   <div className="flex items-center gap-2">
@@ -580,7 +349,9 @@ export default function ActiveCampaignsPage() {
                     >
                       Previous
                     </button>
-                    <span className="text-xs tabular-nums text-slate-500">Page {listPage}</span>
+                    <span className="text-xs tabular-nums text-slate-600 px-1">
+                      Page {listPage}
+                    </span>
                     <button
                       type="button"
                       className="btn-secondary text-sm h-9"
@@ -595,21 +366,152 @@ export default function ActiveCampaignsPage() {
             </>
           ) : null}
         </div>
-      ) : null}
-
-      {enrollFor && (
-        <EnrollInCampaignDialog
-          open
-          onOpenChange={(o) => {
-            if (!o) setEnrollFor(null);
-          }}
-          sequenceId={enrollFor}
-          campaignName={enrollCampaignName}
-          onEnrolled={() => {
-            setListTick((t) => t + 1);
-          }}
-        />
       )}
+
+      <NewCampaignWizard
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onCreated={() => {
+          setWizardOpen(false);
+          setListPage(1);
+          setListQ("");
+          setListQDeb("");
+          setListStatus("all");
+          setFromDate("");
+          setToDate("");
+          setListTick((t) => t + 1);
+        }}
+      />
     </div>
+  );
+}
+
+/* ------------------------ List row ------------------------ */
+
+/**
+ * Whole-row link card. Status is shown as a coloured left bar, an animated dot, and a
+ * pill — three redundant cues so the status reads instantly. Progress is a thin meter
+ * showing completed recipients out of the total enrolled.
+ */
+function CampaignRow({ c, href }: { c: Campaign; href: string }) {
+  const tone = campaignStatusTone(c.status);
+  const total = c.recipient_count ?? c.progress?.total_recipients ?? 0;
+  const completed = c.progress?.completed_recipients ?? 0;
+  const active = c.progress?.active_recipients ?? 0;
+  const stepCount = c.step_count ?? 0;
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const isRunning = c.status === "running";
+  const isPaused = c.status === "paused";
+
+  return (
+    <li>
+      <Link
+        href={href}
+        prefetch={false}
+        className="group relative block overflow-hidden rounded-2xl border border-slate-200/85 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_12px_28px_-20px_rgba(15,23,42,0.16)] transition-all hover:shadow-card-hover hover:border-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warm-400/30 focus-visible:ring-offset-2"
+      >
+        {/* Status bar (left edge) */}
+        <span
+          className={`absolute inset-y-0 left-0 w-1 ${tone.bar}`}
+          aria-hidden
+        />
+
+        <div className="pl-5 sm:pl-6 pr-4 sm:pr-5 py-4 sm:py-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 flex-1">
+              {/* Status row */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone.pill}`}
+                >
+                  <span
+                    className={`relative inline-flex h-1.5 w-1.5 rounded-full ${tone.dot}`}
+                  >
+                    {isRunning ? (
+                      <span
+                        className={`absolute inline-flex h-full w-full animate-ping rounded-full ${tone.dot} opacity-75`}
+                      />
+                    ) : null}
+                  </span>
+                  {tone.label}
+                </span>
+                {isPaused ? (
+                  <span className="text-xs text-amber-800">
+                    sends are on hold
+                  </span>
+                ) : null}
+              </div>
+
+              {/* Name */}
+              <h2 className="mt-2 text-base sm:text-lg font-semibold tracking-tight text-slate-900 truncate">
+                {c.name}
+              </h2>
+
+              {/* Meta line */}
+              <p className="mt-1 text-xs text-slate-600 tabular-nums">
+                {stepCount} step{stepCount === 1 ? "" : "s"}
+                <span className="text-slate-300 mx-1.5">·</span>
+                {total.toLocaleString()} {total === 1 ? "person" : "people"} enrolled
+                {active > 0 ? (
+                  <>
+                    <span className="text-slate-300 mx-1.5">·</span>
+                    <span className="text-slate-700">{active.toLocaleString()} in progress</span>
+                  </>
+                ) : null}
+              </p>
+            </div>
+
+            {/* Right: chevron */}
+            <span
+              aria-hidden
+              className="hidden sm:inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors group-hover:bg-slate-100 group-hover:text-slate-700"
+            >
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M6 3l5 5-5 5"
+                />
+              </svg>
+            </span>
+          </div>
+
+          {/* Progress meter — only when there are recipients */}
+          {total > 0 ? (
+            <div className="mt-4">
+              <div className="flex items-center justify-between gap-3 mb-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Progress
+                </span>
+                <span className="text-xs font-semibold tabular-nums text-slate-700">
+                  {completed.toLocaleString()} / {total.toLocaleString()}
+                  <span className="text-slate-400 font-normal ml-1.5">
+                    ({pct}%)
+                  </span>
+                </span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    c.status === "finished"
+                      ? "bg-slate-400"
+                      : isPaused
+                        ? "bg-amber-400"
+                        : "bg-emerald-500"
+                  }`}
+                  style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                />
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </Link>
+    </li>
   );
 }

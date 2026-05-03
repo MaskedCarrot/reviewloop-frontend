@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import type { User } from "@/types";
 import { LOCAL_DEMO_FLAG, TEST_USER_ID } from "@/lib/testMode/ids";
 import { getMe, isBrowserLocalMockApp } from "./api";
@@ -49,25 +49,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refresh();
   }, [refresh]);
 
-  const login = (u: User) => {
+  const login = useCallback((u: User) => {
     if (u.id !== TEST_USER_ID) {
       localStorage.removeItem(LOCAL_DEMO_FLAG);
     }
     localStorage.setItem("user_id", u.id);
     setUser(u);
-  };
+  }, []);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     localStorage.removeItem("user_id");
     localStorage.removeItem(LOCAL_DEMO_FLAG);
     setUser(null);
-  };
+  }, []);
 
-  return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refresh }}>
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo<AuthState>(
+    () => ({ user, loading, login, logout, refresh }),
+    [user, loading, login, logout, refresh],
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export const useAuth = () => useContext(AuthContext);

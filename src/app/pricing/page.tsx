@@ -1,9 +1,16 @@
-import { getPublicConfig, getPublicMembershipPreview, getPublicSendRatesByCountry } from "@/lib/api/reviewloopApi";
+import { getPublicConfig, getPublicMembershipPreview, getPublicSendRatesByCountry } from "@/lib/api/goodwordApi";
 import { CREDIT_RATES } from "@/lib/pricingDisplay";
 import { getVisitorCountryCodeFromHeaders } from "@/lib/visitorCountry";
 import PricingView from "./PricingView";
 
 export const dynamic = "force-dynamic";
+
+export const metadata = {
+  title: "Pricing · GoodWord",
+  description:
+    "Free to start, $10/mo for Pro with 200 credits. Top-up packs from $10 (100 credits) up to $140 (2000 credits). No subscription required to send your first review request.",
+  robots: { index: true, follow: true },
+};
 
 function countryFromQuery(raw: string | string[] | undefined): string | null {
   const v = Array.isArray(raw) ? raw[0] : raw;
@@ -12,10 +19,11 @@ function countryFromQuery(raw: string | string[] | undefined): string | null {
   return null;
 }
 
-type SearchParams = { country?: string | string[] };
+type SearchParams = Promise<{ country?: string | string[] }>;
 
 export default async function PricingPage({ searchParams }: { searchParams: SearchParams }) {
-  const fromQuery = countryFromQuery(searchParams?.country);
+  const sp = await searchParams;
+  const fromQuery = countryFromQuery(sp?.country);
   const fromHeaders = await getVisitorCountryCodeFromHeaders();
   const visitorCountry = fromQuery ?? fromHeaders;
 
@@ -25,7 +33,11 @@ export default async function PricingPage({ searchParams }: { searchParams: Sear
     getPublicMembershipPreview(visitorCountry).catch(() => null),
   ]);
 
+  const showSms = config?.sms_public_preview === true;
   const defEmail = config?.email_credits ?? CREDIT_RATES.email;
+  // When SMS is hidden in public preview, the API returns sms_credits=null. Fall back
+  // to a sane number purely so we can pass a defined prop down — the view ignores it
+  // anyway when ``showSms`` is false.
   const defSms = config?.sms_credits ?? CREDIT_RATES.sms;
 
   let marketName: string | null = null;
@@ -48,6 +60,7 @@ export default async function PricingPage({ searchParams }: { searchParams: Sear
       marketName={marketName}
       emailPerSend={emailPerSend}
       smsPerSegment={smsPerSeg}
+      showSms={showSms}
       sendRates={sendRates}
       membership={membership}
       usedFallback={usedFallback}

@@ -25,7 +25,7 @@ export default function DashboardOverviewSkeleton() {
       </section>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className="card p-5 lg:col-span-2 border-slate-200/80 ring-1 ring-slate-100 min-h-[280px]">
+        <div className="card p-5 lg:col-span-2 border-slate-200 ring-1 ring-slate-100 min-h-[280px]">
           <ShimmerBlock className="h-4 w-40 mb-1" />
           <ShimmerBlock className="h-2.5 w-52 mb-5" />
           <div className="space-y-0">
@@ -46,7 +46,7 @@ export default function DashboardOverviewSkeleton() {
             ))}
           </div>
         </div>
-        <div className="card p-5 border-slate-200/80 ring-1 ring-slate-100 min-h-[200px]">
+        <div className="card p-5 border-slate-200 ring-1 ring-slate-100 min-h-[200px]">
           <ShimmerBlock className="h-4 w-32 mb-4" />
           <ShimmerBlock className="h-9 w-24 mb-2" />
           <ShimmerBlock className="h-3 w-full mb-1" />
@@ -55,7 +55,7 @@ export default function DashboardOverviewSkeleton() {
         </div>
       </div>
 
-      <div className="card p-5 max-w-2xl border-slate-200/80 border-dashed bg-slate-50/50 min-h-[120px]">
+      <div className="card p-5 max-w-2xl border-slate-200 border-dashed bg-slate-50 min-h-[120px]">
         <ShimmerBlock className="h-4 w-44 mb-2" />
         <ShimmerBlock className="h-3 w-full max-w-md mb-3" />
         <ShimmerBlock className="h-10 w-32 rounded-lg" />

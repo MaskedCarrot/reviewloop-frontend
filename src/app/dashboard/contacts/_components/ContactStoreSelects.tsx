@@ -21,7 +21,7 @@ export function ContactListStoreFilter({
 }) {
   return (
     <div className={className}>
-      <label htmlFor={id} className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+      <label htmlFor={id} className="text-[10px] font-medium uppercase tracking-wide text-slate-600">
         Store
       </label>
       <StyledSelect
@@ -81,7 +81,7 @@ export function ContactAssignStoreField({
           </option>
         ))}
       </StyledSelect>
-      <p className={compact ? "text-[11px] text-slate-500 mt-1.5" : "text-sm text-slate-600 leading-relaxed"}>
+      <p className={compact ? "text-[11px] text-slate-600 mt-1.5" : "text-sm text-slate-600 leading-relaxed"}>
         Review links in messages use this store when set; otherwise your default store from Settings.
       </p>
     </div>

@@ -5,24 +5,21 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { createContact } from "@/lib/api";
 import { ButtonSpinner, useAppToast } from "@/components/ToastProvider";
 import StyledSelect from "@/components/StyledSelect";
-import type { BusinessLocation, Campaign } from "@/types";
+import type { BusinessLocation, Template } from "@/types";
 import { ContactAssignStoreField } from "./ContactStoreSelects";
-import { delayLabel } from "./contactFormat";
 
 export default function SingleContactForm({
   onCreated,
   sms,
-  defaultSendDelayMinutes,
-  campaigns,
+  templates,
   locations = [],
   defaultLocationId = null,
   variant = "standout",
 }: {
   onCreated: () => void;
   sms: boolean;
-  defaultSendDelayMinutes: number;
   /** Used when "Send a message" is enabled to pick which template (or default). */
-  campaigns: Campaign[];
+  templates: Template[];
   /** When non-empty, user can tag the contact to a store for review links. */
   locations?: BusinessLocation[];
   defaultLocationId?: string | null;
@@ -85,7 +82,7 @@ export default function SingleContactForm({
     setBusy(true);
     try {
       const chosen =
-        form.send_now && sendTemplateId ? campaigns.find((c) => c.id === sendTemplateId) : undefined;
+        form.send_now && sendTemplateId ? templates.find((c) => c.id === sendTemplateId) : undefined;
 
       const body: {
         name?: string;
@@ -94,8 +91,8 @@ export default function SingleContactForm({
         consent: boolean;
         send_now: boolean;
         channel?: "email" | "sms";
-        email_campaign_id?: string;
-        sms_campaign_id?: string;
+        email_template_id?: string;
+        sms_template_id?: string;
         location_id?: string;
       } = {
         name: form.name.trim() || undefined,
@@ -113,10 +110,10 @@ export default function SingleContactForm({
         if (chosen) {
           if (chosen.channel === "email") {
             body.channel = "email";
-            body.email_campaign_id = chosen.id;
+            body.email_template_id = chosen.id;
           } else {
             body.channel = "sms";
-            body.sms_campaign_id = chosen.id;
+            body.sms_template_id = chosen.id;
           }
         } else {
           if (form.channel && form.channel !== "auto") {
@@ -125,32 +122,37 @@ export default function SingleContactForm({
         }
       }
 
-      await createContact(body);
+      const res = await createContact(body);
       setForm({ name: "", email: "", phone: "", consent: false, channel: "auto", send_now: false });
       setSendTemplateId("");
       setAssignStoreId("");
-      const defaultSend = !chosen;
-      const delayMins = chosen
-        ? chosen.delay_minutes ?? defaultSendDelayMinutes
-        : defaultSendDelayMinutes;
-      setMsg({
-        kind: "ok",
-        text: form.send_now ? (
-          <>
-            Review request queued for {delayLabel(delayMins)}
-            {defaultSend ? " (default on Message, or your channel above)." : " (from this message). "}
-            <Link href="/dashboard/settings" className="font-medium text-emerald-950/90 hover:underline">
-              Send delay
-            </Link>{" "}
-            · <Link href="/dashboard/templates" className="font-medium text-emerald-950/90 hover:underline">Templates</Link>
-            .
-          </>
-        ) : (
-          "Contact added (no message queued)."
-        ),
-      });
+      const merged = !!res.matched_existing;
+      const successText: ReactNode = form.send_now ? (
+        <>
+          {merged
+            ? "We already had this customer — updated their details and queued the request. "
+            : "Review request queued. "}
+          <Link href="/dashboard/templates" className="font-medium text-emerald-950/90 hover:underline">
+            Templates
+          </Link>
+          .
+        </>
+      ) : merged ? (
+        "We already had this customer — updated their details (no duplicate created)."
+      ) : (
+        "Contact added (no message queued)."
+      );
+      setMsg({ kind: "ok", text: successText });
       onCreated();
-      toast.success(form.send_now ? "Message queued" : "Contact added");
+      toast.success(
+        merged
+          ? form.send_now
+            ? "Updated · message queued"
+            : "Updated existing contact"
+          : form.send_now
+            ? "Message queued"
+            : "Contact added",
+      );
     } catch (e: unknown) {
       setMsg({ kind: "err", text: e instanceof Error ? e.message : "Could not save" });
     } finally {
@@ -162,8 +164,8 @@ export default function SingleContactForm({
     variant === "dialog" ? "space-y-3" : "card p-6 space-y-4";
   const helpClass = variant === "dialog" ? "text-sm text-slate-600" : "text-sm text-slate-600 leading-relaxed";
   const showChannel = form.send_now && !sendTemplateId;
-  const emailCampaigns = campaigns.filter((c) => c.channel === "email");
-  const smsCampaigns = campaigns.filter((c) => c.channel === "sms");
+  const emailTemplates = templates.filter((c) => c.channel === "email");
+  const smsTemplates = templates.filter((c) => c.channel === "sms");
 
   const inner = (
     <>
@@ -256,14 +258,14 @@ export default function SingleContactForm({
             className="w-full"
           >
             <option value="">Default (per Message page)</option>
-            {emailCampaigns.map((c) => (
+            {emailTemplates.map((c) => (
               <option key={c.id} value={c.id}>
                 Email: {c.name}
                 {c.is_default ? " (default)" : ""}
               </option>
             ))}
             {sms &&
-              smsCampaigns.map((c) => (
+              smsTemplates.map((c) => (
                 <option key={c.id} value={c.id}>
                   SMS: {c.name}
                   {c.is_default ? " (default)" : ""}
@@ -271,7 +273,7 @@ export default function SingleContactForm({
               ))}
           </StyledSelect>
           {sendTemplateId && (
-            <p className="text-xs text-slate-500 mt-1.5">
+            <p className="text-xs text-slate-600 mt-1.5">
               Picks <strong>email or SMS</strong> from that message.{" "}
               <Link href="/dashboard/templates" className="text-brand-600 font-medium hover:underline">
                 Edit templates
@@ -335,7 +337,7 @@ export default function SingleContactForm({
   }
   return (
     <section className="max-w-2xl">
-      <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">Send a review request</h2>
+      <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3">Send a review request</h2>
       <form onSubmit={submit} className={formClass}>
         {inner}
       </form>

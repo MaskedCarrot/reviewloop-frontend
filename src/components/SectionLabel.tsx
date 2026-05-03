@@ -5,7 +5,7 @@ export default function SectionLabel({ children, id, className = "" }: { childre
   return (
     <h2
       id={id}
-      className={["text-[11px] font-medium uppercase tracking-[0.12em] text-slate-400", className].filter(Boolean).join(" ")}
+      className={["text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500", className].filter(Boolean).join(" ")}
     >
       {children}
     </h2>

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import React from "react";
 import DashboardCreditBalance from "@/components/DashboardCreditBalance";
 import InfoTip from "@/components/InfoTip";
 
@@ -22,7 +23,7 @@ export default function DashboardPageHeader({
   credits,
 }: {
   eyebrow?: string;
-  title: string;
+  title: React.ReactNode;
   description?: ReactNode;
   info?: Info;
   end?: ReactNode;
@@ -32,8 +33,13 @@ export default function DashboardPageHeader({
   const showEndColumn = showCreditChip || end != null;
 
   return (
-    <header className="space-y-2">
-      {eyebrow ? <p className="app-eyebrow">{eyebrow}</p> : null}
+    <header className="space-y-2.5">
+      {eyebrow ? (
+        <p className="app-eyebrow">
+          <span className="h-1.5 w-1.5 rounded-full bg-warm-500" aria-hidden />
+          {eyebrow}
+        </p>
+      ) : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0 flex-1 relative z-10 sm:z-auto">
           <div className="flex flex-wrap items-baseline gap-1.5 min-w-0">
@@ -45,7 +51,7 @@ export default function DashboardPageHeader({
             ) : null}
           </div>
           {description ? (
-            <div className="app-subtitle text-slate-600 mt-1.5 max-w-2xl [&>a]:text-brand-600 [&>a]:font-medium [&>a]:hover:underline">
+            <div className="app-subtitle text-slate-600 mt-2 max-w-2xl [&>a]:text-warm-700 [&>a]:font-medium [&>a]:hover:underline [&>a]:underline-offset-2">
               {description}
             </div>
           ) : null}

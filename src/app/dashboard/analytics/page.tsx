@@ -15,13 +15,14 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import ActiveReviewPlatformsStrip from "@/components/ActiveReviewPlatformsStrip";
 import { getDashboardStats } from "@/lib/api";
-import { activePlatformChips } from "@/lib/reviewPlatformsFromLocations";
+import { isSmsEnabledForBusiness } from "@/lib/countryUi";
+import { useBrowserLocalMockApp } from "@/lib/useBrowserLocalMockApp";
 import DashboardPageHeader from "@/components/DashboardPageHeader";
 import AnalyticsPageSkeleton from "@/components/skeletons/AnalyticsPageSkeleton";
 import ImpactOverviewChart from "@/components/ImpactOverviewChart";
 import StyledSelect from "@/components/StyledSelect";
+import Disclosure from "@/components/Disclosure";
 import { useDashboardBootstrap } from "../DashboardBootstrapProvider";
 import type { DashboardStats } from "@/types";
 
@@ -38,13 +39,9 @@ const STATUS_BAR_COLORS: Record<string, string> = {
 
 const PLATFORM_CHART_COLOR = "#6366f1";
 
-function pct(n: number, d: number): string {
-  if (d <= 0) return "0";
-  return Math.min(100, Math.round((n / d) * 100)).toString();
-}
-
 export default function AnalyticsPage() {
   const { bootstrap } = useDashboardBootstrap();
+  const isLocalMock = useBrowserLocalMockApp();
   const [days, setDays] = useState(30);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -53,7 +50,9 @@ export default function AnalyticsPage() {
   const credits = bootstrap?.credits ?? null;
   const publicCfg = bootstrap?.config ?? null;
   const myRates = bootstrap?.credit_rates ?? null;
-  const locations = bootstrap?.locations?.locations ?? [];
+  // Channel-mix charts are only meaningful when both channels can produce data.
+  // Hide them entirely for email-only accounts to avoid the awkward empty pies.
+  const smsActive = isSmsEnabledForBusiness(bootstrap?.business) || isLocalMock;
 
   useEffect(() => {
     let live = true;
@@ -77,7 +76,7 @@ export default function AnalyticsPage() {
 
   const sent = stats?.funnel.sent ?? 0;
   const view = stats?.funnel.view ?? 0;
-  const googleClicks = stats?.funnel.click_google ?? 0;
+  const platformClicks = stats?.funnel.click_platform ?? 0;
   const feedback = stats?.funnel.submit_feedback ?? 0;
   const creditsUsed = stats?.credits_used ?? 0;
 
@@ -126,7 +125,7 @@ export default function AnalyticsPage() {
   }, [stats?.messages_by_channel_sent]);
 
   const platformBarData = useMemo(() => {
-    const o = stats?.outbound_clicks_by_platform;
+    const o = stats?.clicks_by_platform;
     if (!o || Object.keys(o).length === 0) return [];
     return Object.entries(o)
       .map(([k, v]) => ({
@@ -134,11 +133,11 @@ export default function AnalyticsPage() {
         value: v,
       }))
       .sort((a, b) => b.value - a.value);
-  }, [stats?.outbound_clicks_by_platform]);
+  }, [stats?.clicks_by_platform]);
 
   const tapRate = useMemo(
-    () => (sent > 0 ? Math.min(100, Math.round((googleClicks / sent) * 100)) : null),
-    [googleClicks, sent],
+    () => (sent > 0 ? Math.min(100, Math.round((platformClicks / sent) * 100)) : null),
+    [platformClicks, sent],
   );
   const feedbackFromSendRate = useMemo(
     () => (sent > 0 ? Math.min(100, Math.round((feedback / sent) * 100)) : null),
@@ -147,11 +146,6 @@ export default function AnalyticsPage() {
   const creditsPerSend = useMemo(
     () => (sent > 0 ? creditsUsed / sent : null),
     [creditsUsed, sent],
-  );
-
-  const platformChips = useMemo(
-    () => activePlatformChips(locations, publicCfg),
-    [locations, publicCfg],
   );
 
   if (!loading && (error || !stats)) {
@@ -178,36 +172,11 @@ export default function AnalyticsPage() {
         eyebrow="Deep dive"
         title="Analytics"
         credits={credits != null ? credits.balance : undefined}
-        description={
-          <>
-            <p className="line-clamp-2 max-w-3xl text-slate-600">
-              Pipeline, channels, and routing events for the report period.{" "}
-              <Link href="/dashboard" className="font-medium text-brand-600 hover:text-brand-800">
-                Overview
-              </Link>{" "}
-              keeps the headline KPIs and a simple send → open → tap walkthrough.
-            </p>
-            <Link href="/dashboard" className="mt-2 inline-flex text-sm font-medium text-brand-600 hover:text-brand-800">
-              ← Back to overview
-            </Link>
-          </>
-        }
-        info={{
-          label: "What you see here",
-          size: "md",
-          children: (
-            <p>
-              <strong>Overview</strong> shows the three ROI-style cards and a compact journey. <strong>Analytics</strong>{" "}
-              adds message <strong>status</strong> counts, <strong>per-store</strong> activity when you have
-              locations, <strong>sent-only</strong> channel mix, and <strong>review-link taps by site</strong> when
-              available, plus the funnel bar chart and in-app star distribution.
-            </p>
-          ),
-        }}
+        description="Detailed pipeline, channel, and routing breakdowns for the period."
         end={
         <div className="w-full sm:w-44">
           <label className="label" htmlFor="analytics-range">
-            Report period
+            Period
           </label>
           <StyledSelect
             id="analytics-range"
@@ -224,73 +193,99 @@ export default function AnalyticsPage() {
         }
       />
 
-      {publicCfg && !loading && <ActiveReviewPlatformsStrip platforms={platformChips} className="max-w-3xl" />}
-
       {loading ? (
         <AnalyticsPageSkeleton />
       ) : (
         stats && (
         <>
       <div className="card p-5">
-        <h2 className="text-sm font-semibold text-slate-900">Period totals</h2>
-        <p className="text-xs text-slate-500 mt-0.5 mb-3">Raw counts in the window. Headline rates are on Overview.</p>
+        <h2 className="app-section-heading">Period totals</h2>
+        <p className="text-xs text-slate-600 mt-0.5 mb-3">Raw counts in the window.</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <AnalyticsMiniStat label="Message rows" value={stats.messages_total} />
           <AnalyticsMiniStat label="Sends" value={sent} />
-          <AnalyticsMiniStat label="Google taps" value={googleClicks} />
+          <AnalyticsMiniStat label="Site taps" value={platformClicks} />
           <AnalyticsMiniStat label="Private notes" value={feedback} />
         </div>
       </div>
 
-      {stats.store_performance && stats.store_performance.length > 0 && (
-        <div className="card p-0 overflow-x-auto">
-          <div className="p-5 sm:p-6 border-b border-slate-200/50">
-            <h2 className="text-sm font-semibold text-slate-900">By store</h2>
-            <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
-              {stats.multi_location
-                ? "Attributed from each message's store (or the routing page linked to that message). Rows with no store stay in Unassigned when you run multiple locations—set a store on the contact or send so numbers land in the right column."
-                : "This row mirrors your business location; add a second store under Settings to compare sites side by side."}
-            </p>
-          </div>
-          <div className="min-w-[720px]">
-            <table className="w-full text-sm text-left">
-              <thead>
-                <tr className="border-b border-slate-200/80 bg-slate-50/80 text-slate-600 text-xs font-medium uppercase tracking-wide">
-                  <th className="px-4 sm:px-5 py-3 pr-2">Store</th>
-                  <th className="px-2 py-3 text-right tabular-nums">Rows</th>
-                  <th className="px-2 py-3 text-right tabular-nums">Sends</th>
-                  <th className="px-2 py-3 text-right tabular-nums">Credits</th>
-                  <th className="px-2 py-3 text-right tabular-nums">Opens</th>
-                  <th className="px-2 py-3 text-right tabular-nums">Google</th>
-                  <th className="px-2 py-3 text-right tabular-nums">Other</th>
-                  <th className="px-4 sm:px-5 py-3 text-right tabular-nums pl-2">Notes</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100/90">
-                {stats.store_performance.map((row) => (
-                  <tr key={row.location_id} className="text-slate-800">
-                    <td className="px-4 sm:px-5 py-3 font-medium pr-2">{row.name}</td>
-                    <td className="px-2 py-3 text-right tabular-nums text-slate-700">{row.messages_total}</td>
-                    <td className="px-2 py-3 text-right tabular-nums text-slate-700">{row.sends}</td>
-                    <td className="px-2 py-3 text-right tabular-nums text-slate-700">{row.credits_used}</td>
-                    <td className="px-2 py-3 text-right tabular-nums text-slate-700">{row.view}</td>
-                    <td className="px-2 py-3 text-right tabular-nums text-slate-700">{row.click_google}</td>
-                    <td className="px-2 py-3 text-right tabular-nums text-slate-700">{row.click_outbound}</td>
-                    <td className="px-4 sm:px-5 py-3 text-right tabular-nums text-slate-700 pl-2">{row.submit_feedback}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {/* Primary chart — journey */}
+      <div className="card p-5 sm:p-6">
+        <h2 className="app-section-heading">Journey from sends</h2>
+        <p className="text-xs text-slate-600 mt-0.5 mb-4">Routing page events: opens, Google / other site taps, private notes.</p>
+        <ImpactOverviewChart stats={stats} />
+      </div>
 
-      {statusBarData.length > 0 && (
-        <div className="card p-5 sm:p-6">
-          <h2 className="text-sm font-semibold text-slate-900">Message status pipeline</h2>
-          <p className="text-xs text-slate-500 mt-0.5 mb-4">
-            All review-request rows in this period, grouped by status (scheduled, sent, failed, and more if present).
+      <div className="card p-5 sm:p-6">
+        <h2 className="app-section-heading">Per-send efficiency</h2>
+        <p className="text-xs text-slate-600 mt-0.5 mb-4">Derived from sends and credit debits in this period.</p>
+        <ul className="space-y-3 text-sm text-slate-700">
+          <li className="flex justify-between gap-3 border-b border-slate-200 pb-2.5">
+            <span>Link open rate (of sends)</span>
+            <span className="font-semibold tabular-nums text-slate-900">{sent > 0 ? `${openRate ?? 0}%` : "—"}</span>
+          </li>
+          <li className="flex justify-between gap-3 border-b border-slate-200 pb-2.5">
+            <span>Google tap rate (of sends)</span>
+            <span className="font-semibold tabular-nums text-slate-900">{sent > 0 ? `${tapRate ?? 0}%` : "—"}</span>
+          </li>
+          <li className="flex justify-between gap-3 border-b border-slate-200 pb-2.5">
+            <span>Private note rate (of sends)</span>
+            <span className="font-semibold tabular-nums text-slate-900">{sent > 0 ? `${feedbackFromSendRate ?? 0}%` : "—"}</span>
+          </li>
+          <li className="flex justify-between gap-3">
+            <span>Avg. credits per delivered send</span>
+            <span className="font-semibold tabular-nums text-slate-900">
+              {creditsPerSend != null ? (creditsPerSend < 10 ? creditsPerSend.toFixed(2) : creditsPerSend.toFixed(1)) : "—"}
+              {creditsPerSend != null ? " cr" : ""}
+            </span>
+          </li>
+        </ul>
+      </div>
+
+      <p className="text-sm font-semibold text-slate-700 pt-2">More breakdowns</p>
+
+      {stats.store_performance && stats.store_performance.length > 0 ? (
+        <Disclosure label="By store" hint={`${stats.store_performance.length} ${stats.store_performance.length === 1 ? "store" : "stores"}`}>
+          <p className="text-xs text-slate-600 mb-3 leading-relaxed">
+            {stats.multi_location
+              ? "Attributed from each message's store. Rows without a store stay Unassigned."
+              : "Add a second store under Settings to compare sites side by side."}
           </p>
+          <div className="overflow-x-auto -mx-4 sm:mx-0">
+            <div className="min-w-[720px]">
+              <table className="w-full text-sm text-left">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-slate-600 text-[11px] font-semibold uppercase tracking-wider">
+                    <th className="px-3 py-2.5 pr-2">Store</th>
+                    <th className="px-2 py-2.5 text-right tabular-nums">Rows</th>
+                    <th className="px-2 py-2.5 text-right tabular-nums">Sends</th>
+                    <th className="px-2 py-2.5 text-right tabular-nums">Credits</th>
+                    <th className="px-2 py-2.5 text-right tabular-nums">Opens</th>
+                    <th className="px-2 py-2.5 text-right tabular-nums">Taps</th>
+                    <th className="px-3 py-2.5 text-right tabular-nums pl-2">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {stats.store_performance.map((row) => (
+                    <tr key={row.location_id} className="text-slate-800 hover:bg-slate-50">
+                      <td className="px-3 py-2.5 font-semibold text-slate-900 pr-2">{row.name}</td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">{row.messages_total}</td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">{row.sends}</td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">{row.credits_used}</td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">{row.view}</td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">{row.click_platform}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums pl-2">{row.submit_feedback}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </Disclosure>
+      ) : null}
+
+      {statusBarData.length > 0 ? (
+        <Disclosure label="Message status pipeline" hint="Counts grouped by status">
           <div className="h-64 w-full min-w-0 -mx-1">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={statusBarData} layout="vertical" margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
@@ -319,216 +314,110 @@ export default function AnalyticsPage() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </div>
-      )}
+        </Disclosure>
+      ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="card p-5 sm:p-6">
-          <h2 className="text-sm font-semibold text-slate-900">Journey from sends</h2>
-          <p className="text-xs text-slate-500 mt-0.5 mb-4">Routing page events: opens, Google / other site taps, private notes.</p>
-          <ImpactOverviewChart stats={stats} />
-        </div>
+      {smsActive ? (
+      <Disclosure label="Channel mix" hint="Email vs SMS for all rows and delivered-only sends">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 min-h-[260px]">
+            <h3 className="text-sm font-semibold text-slate-900">All message rows</h3>
+            <p className="text-xs text-slate-600 mt-0.5 mb-2">Email vs SMS (queued, scheduled, sent, failed).</p>
+            {channelPie.length > 0 ? (
+              <div className="h-48 w-full min-w-0 -mx-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={channelPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={48} outerRadius={72} paddingAngle={2}>
+                      {channelPie.map((entry, i) => (<Cell key={i} fill={entry.fill} />))}
+                    </Pie>
+                    <Tooltip contentStyle={{ borderRadius: "12px", fontSize: "12px" }} formatter={(v) => { const n = Number(v ?? 0); return [`${n} message${n === 1 ? "" : "s"}`, ""]; }} />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-600 py-4">No message rows in this range yet.</p>
+            )}
+          </div>
 
-        <div className="card p-5 sm:p-6">
-          <h2 className="text-sm font-semibold text-slate-900">Per-send efficiency</h2>
-          <p className="text-xs text-slate-500 mt-0.5 mb-4">Derived from sends and credit debits in this period.</p>
-          <ul className="space-y-3 text-sm text-slate-700">
-            <li className="flex justify-between gap-3 border-b border-slate-100 pb-2.5">
-              <span>Link open rate (of sends)</span>
-              <span className="font-semibold tabular-nums text-slate-900">
-                {sent > 0 ? `${openRate ?? 0}%` : "—"}
-              </span>
-            </li>
-            <li className="flex justify-between gap-3 border-b border-slate-100 pb-2.5">
-              <span>Google tap rate (of sends)</span>
-              <span className="font-semibold tabular-nums text-slate-900">
-                {sent > 0 ? `${tapRate ?? 0}%` : "—"}
-              </span>
-            </li>
-            <li className="flex justify-between gap-3 border-b border-slate-100 pb-2.5">
-              <span>Private note rate (of sends)</span>
-              <span className="font-semibold tabular-nums text-slate-900">
-                {sent > 0 ? `${feedbackFromSendRate ?? 0}%` : "—"}
-              </span>
-            </li>
-            <li className="flex justify-between gap-3">
-              <span>Avg. credits per delivered send</span>
-              <span className="font-semibold tabular-nums text-slate-900">
-                {creditsPerSend != null ? (creditsPerSend < 10 ? creditsPerSend.toFixed(2) : creditsPerSend.toFixed(1)) : "—"}
-                {creditsPerSend != null ? " cr" : ""}
-              </span>
-            </li>
-          </ul>
+          <div className="rounded-xl border border-slate-200 bg-white p-4 min-h-[260px]">
+            <h3 className="text-sm font-semibold text-slate-900">Delivered sends</h3>
+            <p className="text-xs text-slate-600 mt-0.5 mb-2">Only successful (credits were charged).</p>
+            {sentChannelPie.length > 0 ? (
+              <div className="h-48 w-full min-w-0 -mx-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={sentChannelPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={48} outerRadius={72} paddingAngle={2}>
+                      {sentChannelPie.map((entry, i) => (<Cell key={i} fill={entry.fill} />))}
+                    </Pie>
+                    <Tooltip contentStyle={{ borderRadius: "12px", fontSize: "12px" }} formatter={(v) => { const n = Number(v ?? 0); return [`${n} send${n === 1 ? "" : "s"}`, ""]; }} />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-600 py-4">No delivered sends in this range yet.</p>
+            )}
+          </div>
         </div>
-      </div>
+      </Disclosure>
+      ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="card p-5 sm:p-6 min-h-[300px]">
-          <h2 className="text-sm font-semibold text-slate-900">All message rows by channel</h2>
-          <p className="text-xs text-slate-500 mt-0.5 mb-2">Email vs SMS in this range (queued, scheduled, sent, failed, …).</p>
-          {channelPie.length > 0 ? (
-            <div className="h-56 w-full min-w-0 -mx-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={channelPie}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={52}
-                    outerRadius={80}
-                    paddingAngle={2}
-                  >
-                    {channelPie.map((entry, i) => (
-                      <Cell key={i} fill={entry.fill} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{ borderRadius: "12px", fontSize: "12px" }}
-                    formatter={(v) => {
-                      const n = Number(v ?? 0);
-                      return [`${n} message${n === 1 ? "" : "s"}`, ""];
-                    }}
-                  />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <p className="text-sm text-slate-500 py-8">No message rows in this range yet.</p>
-          )}
-        </div>
-
-        <div className="card p-5 sm:p-6 min-h-[300px]">
-          <h2 className="text-sm font-semibold text-slate-900">Delivered sends by channel</h2>
-          <p className="text-xs text-slate-500 mt-0.5 mb-2">Only successful sends (credits were charged for these rows).</p>
-          {sentChannelPie.length > 0 ? (
-            <div className="h-56 w-full min-w-0 -mx-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={sentChannelPie}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={52}
-                    outerRadius={80}
-                    paddingAngle={2}
-                  >
-                    {sentChannelPie.map((entry, i) => (
-                      <Cell key={i} fill={entry.fill} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{ borderRadius: "12px", fontSize: "12px" }}
-                    formatter={(v) => {
-                      const n = Number(v ?? 0);
-                      return [`${n} send${n === 1 ? "" : "s"}`, ""];
-                    }}
-                  />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <p className="text-sm text-slate-500 py-8">No delivered sends in this range yet.</p>
-          )}
-        </div>
-      </div>
-
-      {platformBarData.length > 0 && (
-        <div className="card p-5 sm:p-6">
-          <h2 className="text-sm font-semibold text-slate-900">Review link taps by site</h2>
-          <p className="text-xs text-slate-500 mt-0.5 mb-4">
-            When a customer taps a review destination from your routing page (Google, Yelp, Facebook, …) we attribute it
-            to the business location when the link carries that tag.
-          </p>
+      {platformBarData.length > 0 ? (
+        <Disclosure label="Review link taps by site" hint={`${platformClicks} ${platformClicks === 1 ? "tap" : "taps"} across review destinations`}>
           <div className="h-64 w-full min-w-0 -mx-1">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={platformBarData}
-                layout="vertical"
-                margin={{ top: 4, right: 8, left: 8, bottom: 0 }}
-              >
+              <BarChart data={platformBarData} layout="vertical" margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
                 <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                <YAxis
-                  dataKey="name"
-                  type="category"
-                  width={100}
-                  tick={{ fontSize: 12, fill: "#64748b" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
+                <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 12, fill: "#64748b" }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={{ borderRadius: "12px", fontSize: "12px" }} />
                 <Bar dataKey="value" name="Taps" fill={PLATFORM_CHART_COLOR} fillOpacity={0.88} radius={[0, 4, 4, 0]} maxBarSize={32} />
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </div>
-      )}
+        </Disclosure>
+      ) : null}
 
-      <div className="card p-5 sm:p-6">
-        <h2 className="text-sm font-semibold text-slate-900">Wallet &amp; spend in this period</h2>
-        {credits && (
-          <ul className="mt-3 space-y-2 text-sm text-slate-700">
-            <li className="flex justify-between border-b border-slate-100 pb-2">
-              <span>Credits debited (delivered sends)</span>
-              <span className="font-semibold tabular-nums text-slate-900">{creditsUsed} cr</span>
-            </li>
-            <li className="flex justify-between">
-              <span>Google taps (routing)</span>
-              <span className="font-semibold tabular-nums text-slate-900">{googleClicks}</span>
-            </li>
-          </ul>
-        )}
-        <p className="text-xs text-slate-500 mt-3 leading-relaxed">
-          Email is typically {emailUnit} credit{emailUnit === 1 ? "" : "s"} per send; SMS depends on segments.{" "}
-          <Link href="/dashboard/billing" className="font-medium text-brand-600 hover:text-brand-800">
-            Open billing
-          </Link>{" "}
-          to add credits or see rates.
-        </p>
-      </div>
-
-      <div className="card p-5 sm:p-6">
-        <h2 className="text-sm font-semibold text-slate-900">Private feedback (in-app)</h2>
-        <p className="text-xs text-slate-500 mt-0.5 mb-4">Not Google stars — your internal form.</p>
+      <Disclosure label="Private feedback (in-app)" hint="Star distribution from your internal form">
         {ratingData.some((d) => d.count > 0) ? (
           <div className="h-56 w-full min-w-0 -mx-1">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={ratingData} layout="vertical" margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
                 <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                <YAxis
-                  dataKey="stars"
-                  type="category"
-                  width={40}
-                  tick={{ fontSize: 12, fill: "#64748b" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
+                <YAxis dataKey="stars" type="category" width={40} tick={{ fontSize: 12, fill: "#64748b" }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={{ borderRadius: "12px", fontSize: "12px" }} />
                 <Bar dataKey="count" fill="#6366f1" fillOpacity={0.85} radius={[0, 4, 4, 0]} name="Count" />
               </BarChart>
             </ResponsiveContainer>
           </div>
         ) : (
-          <p className="text-sm text-slate-500">No in-app ratings in this period yet.</p>
+          <p className="text-sm text-slate-600">No in-app ratings in this period yet.</p>
         )}
-      </div>
+      </Disclosure>
 
-      <p className="text-xs text-slate-500">
-        Funnel: send → open link → Google tap, plus optional private note.{" "}
-        {sent > 0 ? (
-          <>
-            Opened {openRate ?? 0}% of sends, {pct(googleClicks, sent)}% tapped Google.{" "}
-          </>
-        ) : null}
-        Window: last {stats.window_days ?? days} days.
-      </p>
+      <Disclosure label="Wallet & spend in this period" hint={`${creditsUsed} credits debited`}>
+        {credits && (
+          <ul className="space-y-2 text-sm text-slate-700">
+            <li className="flex justify-between border-b border-slate-200 pb-2">
+              <span>Credits debited (delivered sends)</span>
+              <span className="font-semibold tabular-nums text-slate-900">{creditsUsed} cr</span>
+            </li>
+            <li className="flex justify-between">
+              <span>Review-site taps (routing)</span>
+              <span className="font-semibold tabular-nums text-slate-900">{platformClicks}</span>
+            </li>
+          </ul>
+        )}
+        <p className="text-xs text-slate-600 mt-3 leading-relaxed">
+          Email is typically {emailUnit} credit{emailUnit === 1 ? "" : "s"} per send; SMS depends on segments.{" "}
+          <Link href="/dashboard/billing" className="font-medium text-brand-600 hover:text-brand-800">
+            Open billing
+          </Link>{" "}
+          to add credits or see rates.
+        </p>
+      </Disclosure>
     </>
         )
       ) }
@@ -572,9 +461,9 @@ function orderStatusKeys(raw: Record<string, number>): string[] {
 
 function AnalyticsMiniStat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-slate-100 bg-slate-50/90 px-3 py-2.5">
-      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500 leading-tight">{label}</div>
-      <div className="text-xl font-semibold text-slate-900 tabular-nums mt-0.5">{value}</div>
+    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600 leading-tight">{label}</div>
+      <div className="text-2xl font-semibold text-slate-900 tabular-nums mt-1 leading-none">{value}</div>
     </div>
   );
 }

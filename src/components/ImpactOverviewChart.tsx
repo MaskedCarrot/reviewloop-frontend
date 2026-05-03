@@ -13,12 +13,10 @@ import type { DashboardStats } from "@/types";
 
 export default function ImpactOverviewChart({ stats }: { stats: DashboardStats }) {
   const sent = stats.funnel.sent ?? 0;
-  const other = stats.funnel.click_outbound ?? 0;
   const data = [
     { name: "Sent", value: sent, sub: "Messages delivered" },
     { name: "Opened", value: stats.funnel.view ?? 0, sub: "Routing page views" },
-    { name: "Google", value: stats.funnel.click_google ?? 0, sub: "Taps to Google" },
-    { name: "Other sites", value: other, sub: "Taps to Yelp, Facebook, etc." },
+    { name: "Site taps", value: stats.funnel.click_platform ?? 0, sub: "Taps to review sites" },
     { name: "Notes", value: stats.funnel.submit_feedback ?? 0, sub: "Private feedback" },
   ];
 

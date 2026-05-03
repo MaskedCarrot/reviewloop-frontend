@@ -18,7 +18,7 @@ export default function ListStats({
     return Boolean(c.email) || (Boolean(c.phone_e164) && sms);
   }).length;
   return (
-    <div className="flex flex-wrap items-baseline justify-end gap-x-2 gap-y-0.5 text-xs tabular-nums text-slate-500 sm:shrink-0">
+    <div className="flex flex-wrap items-baseline justify-end gap-x-2 gap-y-0.5 text-xs tabular-nums text-slate-600 sm:shrink-0">
       <span className="text-slate-700">
         {total} {total === 1 ? "person" : "people"}
         {hasFilters ? " matching" : ""}

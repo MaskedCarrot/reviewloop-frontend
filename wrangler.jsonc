@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "main": ".open-next/worker.js",
-  "name": "reviewloop-frontend",
+  "name": "goodword-frontend",
   "compatibility_date": "2026-04-25",
   "compatibility_flags": [
     "nodejs_compat"
@@ -13,7 +13,7 @@
   "services": [
     {
       "binding": "WORKER_SELF_REFERENCE",
-      "service": "reviewloop-frontend"
+      "service": "goodword-frontend"
     }
   ],
   "images": {
@@ -21,5 +21,31 @@
   },
   "observability": {
     "enabled": true
+  },
+
+  // Production overlay. Deploy with: `wrangler deploy --env production`.
+  // The production env binds to goodword.maskedcarrotlabs.com and points the
+  // frontend at the api.maskedcarrotlabs.com FastAPI backend.
+  //
+  // DNS prerequisite: add a CNAME for goodword.maskedcarrotlabs.com pointing
+  // to the worker (Cloudflare creates this automatically for `custom_domain`
+  // routes — but the apex domain must already be on Cloudflare).
+  "env": {
+    "production": {
+      "name": "goodword-frontend",
+      "routes": [
+        {
+          "pattern": "goodword.maskedcarrotlabs.com",
+          "custom_domain": true
+        }
+      ],
+      "vars": {
+        "NEXT_PUBLIC_DEV": "0",
+        "NEXT_PUBLIC_API_URL": "https://api.maskedcarrotlabs.com",
+        "NEXT_PUBLIC_SITE_URL": "https://goodword.maskedcarrotlabs.com",
+        "NEXT_PUBLIC_GOOGLE_CLIENT_ID": "444152695342-3c6gek52ep223npk33h2i1qn26cigclh.apps.googleusercontent.com",
+        "NEXT_PUBLIC_ADMIN_EMAIL": "2000apoorv@gmail.com"
+      }
+    }
   }
 }

@@ -9,22 +9,26 @@ export interface Business {
   id: string;
   user_id: string;
   name: string;
-  gmb_review_url: string;
   country_code: string;
   timezone: string;
-  default_send_delay_minutes: number;
-  quiet_hours_start: number;
-  quiet_hours_end: number;
   from_name: string;
   from_email: string | null;
   sms_sender_id: string | null;
   branding_color: string;
   /** True for dev / Try demo workspace: UI shows sample data, sends are not delivered externally. */
   is_sandbox?: boolean;
+  /** Admin-controlled gate. When false, every SMS UI is hidden and SMS sends are blocked. */
+  sms_enabled?: boolean;
+  /** When true, sends scheduled inside [quiet_hours_start, quiet_hours_end) (in business tz)
+   *  are deferred to the moment the window closes. */
+  quiet_hours_enabled?: boolean;
+  /** "HH:MM" 24h, business-local. Inclusive start of the no-send window. */
+  quiet_hours_start?: string | null;
+  /** "HH:MM" 24h, business-local. Exclusive end of the no-send window. May wrap past midnight. */
+  quiet_hours_end?: string | null;
   onboarding_completed_at?: string | null;
   created_at: string;
   updated_at: string;
-  default_location_id?: string | null;
 }
 
 export interface Contact {
@@ -33,6 +37,7 @@ export interface Contact {
   name: string | null;
   email: string | null;
   phone_e164: string | null;
+  review_token?: string;
   source: "manual" | "csv" | "qr" | "webhook";
   consent_attested_at: string | null;
   unsubscribed_at: string | null;
@@ -47,107 +52,106 @@ export interface BulkSendResult {
   failed: { contact_id: string; error: string }[];
 }
 
-export interface Campaign {
+/** Message template used in campaigns and standalone sends. */
+export interface Template {
   id: string;
   business_id: string;
   name: string;
   channel: "email" | "sms";
-  template_subject: string | null;
-  template_body: string;
-  delay_minutes: number;
+  subject: string | null;
+  body: string;
   is_default: boolean;
-  /** When set, sends with this template use that store's public review links; otherwise the contact or default store applies. */
-  location_id?: string | null;
   created_at: string;
   updated_at: string;
 }
 
-/** Multi-step follow-up; each step reuses a Campaign (template) row. */
-export type ReviewSequenceLinkStyle = "hosted" | "direct_google" | "direct_yelp";
-
-export type ReviewSequenceListStatus = "running" | "paused" | "completed";
-
-export interface ReviewSequence {
+/** Campaign step links a template to a campaign at a specific delay. */
+export interface CampaignStep {
   id: string;
-  name: string;
-  is_active: boolean;
-  step_count: number;
-  active_enrollments: number;
-  list_status?: ReviewSequenceListStatus;
-  /** If set, all steps use this store's review URLs; overrides template/people defaults. */
-  location_id?: string | null;
-  /** How `{link}` is built; use `{link_google}` / `{link_yelp}` for other tracked one-tap options. */
-  review_link_style?: ReviewSequenceLinkStyle;
-  created_at: string;
-  updated_at: string;
-}
-
-export type ListSequencesResponse = {
-  sequences: ReviewSequence[];
-  total: number;
-  page: number;
-  page_size: number;
-};
-
-export interface ReviewSequenceStep {
-  id: string;
-  sequence_id: string;
-  step_index: number;
   campaign_id: string;
-  delay_after_previous_minutes: number;
-  campaign?: Pick<Campaign, "id" | "name" | "channel" | "template_subject" | "delay_minutes"> | null;
-  created_at?: string;
+  step_index: number;
+  template_id: string;
+  delay_minutes: number;
+  /** Joined template details when loaded via GET /campaigns/{id}. */
+  goodword_templates?: Pick<Template, "id" | "name" | "channel" | "subject"> | null;
 }
 
-/** Aggregated metrics for a follow-up sequence (from GET /sequences/{id}/stats). */
-export interface ReviewSequenceStats {
-  sequence_id: string;
-  step_count: number;
-  enrollments: {
-    active: number;
-    completed: number;
-    stopped_replied: number;
-    cancelled: number;
-    total: number;
-  };
-  messages_sent: number;
-  /** Total sequence-step messages that have been sent (equals messages_sent for sequence traffic). */
-  step_sends_count?: number;
-  /** People who received every step (all steps done for this run). */
-  finished_all_steps_count?: number;
-  /** Messages still scheduled (will send even if the campaign is stopped). */
-  scheduled_messages_pending?: number;
+export interface CampaignProgress {
+  total_steps: number;
+  total_recipients: number;
+  active_recipients: number;
+  completed_recipients: number;
+  /** Seconds the campaign has been actively running (excludes paused time). */
+  active_seconds: number;
+  /** ISO datetime of the next scheduled message send, if any. */
+  next_scheduled_at: string | null;
 }
 
-/** One person in a follow-up (from GET /sequences/{id}/enrollments). */
-export interface ReviewSequenceEnrollment {
-  enrollment_id: string;
-  contact: { id: string; name: string; email: string | null; phone_e164: string | null };
-  status: "active" | "completed" | "stopped_replied" | "cancelled" | string;
+export type CampaignStatus = "scheduled" | "running" | "paused" | "finished";
+
+export interface Campaign {
+  id: string;
+  business_id: string;
+  location_id?: string | null;
+  name: string;
+  status: CampaignStatus;
+  scheduled_at?: string | null;
+  started_at?: string | null;
+  paused_at?: string | null;
+  finished_at?: string | null;
+  total_paused_seconds: number;
+  /** Computed by backend on list/get. */
+  active_seconds?: number;
+  step_count?: number;
+  recipient_count?: number;
+  steps?: CampaignStep[];
+  progress?: CampaignProgress;
   created_at: string;
   updated_at: string;
+}
+
+export interface CampaignRecipient {
+  recipient_id: string;
+  contact: { id: string; name: string | null; email: string | null; phone_e164: string | null };
+  status: "pending" | "active" | "completed" | "stopped" | string;
+  current_step: number;
   step_count: number;
-  last_sent_step_index: number | null;
-  messages_sent: number;
+  enrolled_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
   next_scheduled: { send_at: string; step_index: number } | null;
+}
+
+export interface CampaignStats {
+  campaign_id: string;
+  status: CampaignStatus;
+  total_steps: number;
+  total_recipients: number;
+  active_recipients: number;
+  completed_recipients: number;
+  active_seconds: number;
+  next_scheduled_at: string | null;
+  messages_sent: number;
+  messages_scheduled: number;
 }
 
 export interface ScheduledMessage {
   id: string;
   business_id: string;
   contact_id: string;
+  template_id: string | null;
   campaign_id: string | null;
+  campaign_step_index: number | null;
   channel: "email" | "sms";
   send_at: string;
-  status: "scheduled" | "sending" | "sent" | "failed" | "skipped" | "cancelled";
+  status: "scheduled" | "paused" | "sending" | "sent" | "failed" | "cancelled";
   provider_id: string | null;
-  error: string | null;
+  error_detail: string | null;
   cost_credits: number;
   sent_at: string | null;
   created_at: string;
-  /** When set, routing/review links use this store's destinations. */
   location_id?: string | null;
-  /** Public review page token — small ref; no body stored. The customer page is the same as what we sent. */
+  /** Joined by the list messages endpoint — not stored on the message row itself. */
   routing_token?: string | null;
 }
 
@@ -172,19 +176,18 @@ export interface FeedbackEntry {
   rating: number | null;
   comment: string | null;
   created_at: string;
+  contact_id?: string | null;
 }
 
-/** When present, the business has more than one store/location. Message rows with no `location_id` are "Unassigned", not the default. */
+/** Per-store breakdown in dashboard stats. */
 export interface StorePerformanceRow {
   location_id: string;
   name: string;
-  /** Message rows in the window (any status) attributed to this store. */
   messages_total: number;
   sends: number;
   credits_used: number;
   view: number;
-  click_google: number;
-  click_outbound: number;
+  click_platform: number;
   submit_feedback: number;
 }
 
@@ -198,16 +201,12 @@ export interface DashboardStats {
   funnel: {
     sent: number;
     view: number;
-    click_google: number;
-    click_outbound: number;
+    click_platform: number;
     submit_feedback: number;
   };
-  /** e.g. { yelp: 3 } for third-party review links */
-  outbound_clicks_by_platform?: Record<string, number>;
+  clicks_by_platform?: Record<string, number>;
   rating_distribution: Record<string, number>;
-  /** Omitted on older APIs; one row per store (plus unassigned) when the business has locations. */
   store_performance?: StorePerformanceRow[];
-  /** True if two or more locations exist; affects attribution of rows without `location_id`. */
   multi_location?: boolean;
 }
 
@@ -221,16 +220,17 @@ export interface WebhookKeyRecord {
 }
 
 export interface PublicConfig {
-  /** List of countries where SMS is available (alphanumeric sender, etc.) */
   country_allowlist: string[];
   sms_supported_countries?: string[];
-  /** Default from server rate table (unauthenticated; use getMyCreditRates for your business). */
   email_credits: number;
-  /** Default credits per SMS segment (same as sms_credits_per_segment on /me/credit-rates). */
-  sms_credits: number;
-  /** Optional blurb from the host's rate file (e.g. how segments work). */
+  /** Null when the public-preview gate is off (SMS feature hidden on marketing pages). */
+  sms_credits: number | null;
+  /** When false, marketing pages must hide every SMS reference (price, copy, CTA). */
+  sms_public_preview?: boolean;
   credit_rate_notes?: string | null;
   review_platforms?: ReviewPlatformInfo[];
+  /** Country → primary IANA timezone hint for the onboarding timezone dropdown. */
+  timezone_hints?: Record<string, string>;
 }
 
 /** Server-resolved send costs for the current workspace. */
@@ -276,6 +276,39 @@ export interface SessionBootstrap {
   display_timezone: string;
   /** Server-resolved send costs for the current business; null before a business is created. */
   credit_rates: MyCreditRates | null;
+  /** Plan + monthly usage meters. Backend always returns this; null fields under
+   * `limits` mean unlimited (Pro plan). */
+  usage: PlanUsage;
+}
+
+/**
+ * Server-side resolution of the user's tier + their current usage against the
+ * Free-plan caps. Pro users see all `limits.*` as `null` (unlimited).
+ *
+ * The frontend should treat this as the authoritative source for "can the
+ * user create another campaign / location / send another email" — never
+ * compute it from `credits.balance` alone. The server enforces the caps too,
+ * so attempting an action when locked will surface a clean 402 with copy.
+ */
+export interface PlanUsage {
+  plan: "free" | "pro" | string;
+  limits: {
+    /** Max campaigns the user may CREATE in the current UTC month. */
+    campaigns_per_month: number | null;
+    /** Max stores / locations on the business. */
+    locations: number | null;
+    /** Max credits the user may PURCHASE in the current UTC month (Free only).
+     * Pro is unlimited (`null`). Spend is never capped. */
+    credits_purchase_per_month: number | null;
+  };
+  used: {
+    campaigns_this_month: number;
+    locations_total: number;
+    credits_purchased_this_month: number;
+  };
+  /** Pro monthly grant that lands on every renewal (server-configured via
+   * GOODWORD_PRO_MONTHLY_CREDITS). Surfaces in the pricing card. */
+  pro_monthly_credits: number;
 }
 
 export interface ReviewPlatformInfo {
@@ -296,8 +329,8 @@ export interface BusinessLocation {
   id: string;
   business_id: string;
   name: string;
-  gmb_review_url: string;
-  sort_index: number;
+  address?: string | null;
+  sort_index?: number;
   is_default: boolean;
   created_at: string;
   updated_at: string;
@@ -323,9 +356,8 @@ export interface RoutingBusinessInfo {
   id: string;
   name: string;
   from_name: string | null;
-  gmb_review_url: string;
   branding_color: string;
   review_destinations?: ReviewDestination[];
-  /** Set when the page is scoped to a store (`/q/…?l=`); review buttons use that store's links. */
+  /** Set when the page is scoped to a store (`/q/…?l=`). */
   location_id?: string | null;
 }

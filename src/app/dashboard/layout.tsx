@@ -1,14 +1,15 @@
 "use client";
 
-import { useLayoutEffect, useEffect, useRef } from "react";
+import { useLayoutEffect, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { useBrowserLocalMockApp } from "@/lib/useBrowserLocalMockApp";
 import DashboardDocumentTitle from "@/components/DashboardDocumentTitle";
 import DashboardNav from "@/components/DashboardNav";
-import { DashboardNavigationProvider } from "@/components/DashboardNavigationContext";
+import { DashboardNavigationProvider, useDashboardNavigation } from "@/components/DashboardNavigationContext";
 import DashboardNavProgress from "@/components/DashboardNavProgress";
 import PageLoader from "@/components/PageLoader";
+import DashboardRouteLoadingSkeleton from "@/components/skeletons/DashboardRouteLoadingSkeleton";
 import { DashboardBootstrapProvider, useDashboardBootstrap } from "./DashboardBootstrapProvider";
 
 const ONBOARDING_PATH = "/dashboard/onboarding";
@@ -24,7 +25,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const isLocalMock = useBrowserLocalMockApp();
   const { user, loading: authLoading } = useAuth();
-  const { bootstrap, loading: bootstrapLoading, refreshBootstrap } = useDashboardBootstrap();
+  const { bootstrap, loading: bootstrapLoading } = useDashboardBootstrap();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -33,23 +34,10 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     window.scrollTo(0, 0);
   }, [pathname]);
   const business = bootstrap?.business ?? null;
-  const prevPathRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
   }, [authLoading, user, router]);
-
-  // When leaving onboarding after save, force a one-time bootstrap refresh.
-  useEffect(() => {
-    if (!user) return;
-    const from = prevPathRef.current;
-    const to = pathname;
-    prevPathRef.current = to;
-    if (from == null) return;
-    if (from !== ONBOARDING_PATH || to === ONBOARDING_PATH) return;
-
-    void refreshBootstrap({ force: true });
-  }, [pathname, user?.id, refreshBootstrap]);
 
   useEffect(() => {
     if (bootstrapLoading || !user) return;
@@ -61,7 +49,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
   if (authLoading || !user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="dashboard-shell min-h-screen flex items-center justify-center">
         <DashboardDocumentTitle />
         <PageLoader size="lg" message="Just a moment" />
       </div>
@@ -70,7 +58,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
   if (bootstrapLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="dashboard-shell min-h-screen flex items-center justify-center">
         <DashboardDocumentTitle />
         <PageLoader size="lg" message="Loading your workspace" />
       </div>
@@ -83,18 +71,18 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
   return (
     <DashboardNavigationProvider>
-      <div className="min-h-screen flex flex-col md:flex-row bg-slate-100/80 print:!bg-white">
+      <div className="dashboard-shell min-h-screen flex flex-col md:flex-row print:!bg-white">
         <DashboardNavProgress />
         <DashboardDocumentTitle />
         <DashboardNav />
-        <main className="flex-1 w-full min-w-0 max-w-6xl mx-auto px-4 sm:px-8 py-6 md:py-10 print:max-w-none print:px-0 print:py-0 md:rounded-tl-2xl md:bg-white/95 md:shadow-sm md:min-h-screen md:ring-1 md:ring-slate-200/50">
+        <main className="flex-1 w-full min-w-0 max-w-6xl mx-auto px-4 sm:px-8 py-6 md:py-10 print:max-w-none print:px-0 print:py-0 md:rounded-tl-[28px] md:bg-white md:shadow-[0_1px_2px_rgba(15,23,42,0.04),0_24px_64px_-32px_rgba(15,23,42,0.10)] md:min-h-screen md:ring-1 md:ring-slate-200/80">
         {isLocalMock && pathname !== ONBOARDING_PATH && (
           <div
-            className="mb-5 rounded-xl border border-sky-200/80 bg-sky-50/90 px-4 py-3.5 sm:px-5 text-sm text-sky-950"
+            className="mb-5 rounded-2xl border border-sky-200 bg-sky-50/80 px-4 py-3.5 sm:px-5 text-sm text-sky-950 shadow-soft"
             role="status"
           >
-            <p className="font-medium">Testing environment</p>
-            <p className="text-sky-900/85 mt-0.5">
+            <p className="font-semibold">Testing environment</p>
+            <p className="text-sky-900 mt-0.5 leading-relaxed">
               This session runs in a testing environment in your browser. No emails or SMS will be sent—sends are
               simulated for preview. Sample data, Pro, and credits are local only. CSV, QR, webhooks, and billing also
               update this preview only, with no real charges. Sign in with Google for a live workspace.
@@ -103,19 +91,27 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         )}
         {!isLocalMock && business?.is_sandbox && pathname !== ONBOARDING_PATH && (
           <div
-            className="mb-5 rounded-xl border border-violet-200/80 bg-violet-50/90 px-4 py-3.5 sm:px-5 text-sm text-violet-950"
+            className="mb-5 rounded-2xl border border-violet-200 bg-violet-50/80 px-4 py-3.5 sm:px-5 text-sm text-violet-950 shadow-soft"
             role="status"
           >
-            <p className="font-medium">Demo workspace</p>
-            <p className="text-violet-900/85 mt-0.5">
+            <p className="font-semibold">Demo workspace</p>
+            <p className="text-violet-900 mt-0.5 leading-relaxed">
               Sample data and a healthy credit balance are included so you can explore the product. No real emails or
               texts are sent from this workspace; scheduled sends are recorded only (sandbox).
             </p>
           </div>
         )}
-        <div className="print:!animate-none">{children}</div>
+        <div className="print:!animate-none">
+          <PendingContent>{children}</PendingContent>
+        </div>
         </main>
       </div>
     </DashboardNavigationProvider>
   );
+}
+
+function PendingContent({ children }: { children: React.ReactNode }) {
+  const { isPending } = useDashboardNavigation();
+  if (isPending) return <DashboardRouteLoadingSkeleton />;
+  return <>{children}</>;
 }

@@ -18,7 +18,7 @@ function DashboardDocumentTitleInner() {
     if (p === "/dashboard/contacts" && searchParams.get("tab") === "sends") {
       label = "Sends";
     }
-    document.title = `${label} · ReviewLoop`;
+    document.title = `${label} · GoodWord`;
   }, [pathname, searchParams]);
 
   return null;

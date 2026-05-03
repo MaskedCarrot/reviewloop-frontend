@@ -7,7 +7,6 @@ import { ButtonSpinner, useAppToast } from "@/components/ToastProvider";
 import StyledSelect from "@/components/StyledSelect";
 import type { BusinessLocation } from "@/types";
 import { ContactAssignStoreField } from "./ContactStoreSelects";
-import { delayLabel } from "./contactFormat";
 
 const CSV_SAMPLE = `name,email,phone,external_ref
 Jane Smith,jane@example.com,+447700900123,order_1001
@@ -17,18 +16,16 @@ Sam Jones,,+447700900456,walkin_7`;
 export default function CsvUploadForm({
   onCompleted,
   sms,
-  defaultSendDelayMinutes,
-  emailCampaignId,
-  smsCampaignId,
+  emailTemplateId,
+  smsTemplateId,
   locations = [],
   defaultLocationId = null,
   variant = "default",
 }: {
   onCompleted: () => void;
   sms: boolean;
-  defaultSendDelayMinutes: number;
-  emailCampaignId: string;
-  smsCampaignId: string;
+  emailTemplateId: string;
+  smsTemplateId: string;
   locations?: BusinessLocation[];
   defaultLocationId?: string | null;
   variant?: "default" | "dialog";
@@ -62,8 +59,8 @@ export default function CsvUploadForm({
         consent,
         channel,
         enqueue,
-        emailCampaignId: emailCampaignId || undefined,
-        smsCampaignId: smsCampaignId || undefined,
+        emailTemplateId: emailTemplateId || undefined,
+        smsTemplateId: smsTemplateId || undefined,
         locationId: assignStoreId.trim() || undefined,
       });
       setResult(out);
@@ -88,20 +85,20 @@ export default function CsvUploadForm({
         variant === "dialog" ? "space-y-3" : "card p-5 space-y-3 max-w-2xl"
       }
     >
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-slate-600">
         UTF-8 <code className="text-[11px] rounded bg-slate-100 px-1 py-0.5">.csv</code> with a header row. Each row
         needs{" "}
         <strong className="font-medium text-slate-600">email</strong> or <strong className="font-medium text-slate-600">phone</strong>{" "}
         (E.164, e.g. <code className="text-[11px]">+447…</code>).
       </p>
-      <figure className="rounded-lg border border-slate-200/90 bg-slate-50/80 overflow-hidden">
-        <figcaption className="px-2.5 py-1.5 border-b border-slate-200/80 bg-slate-100/60 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+      <figure className="rounded-lg border border-slate-200 bg-slate-50 overflow-hidden">
+        <figcaption className="px-2.5 py-1.5 border-b border-slate-200 bg-slate-100/60 text-[10px] font-medium uppercase tracking-wide text-slate-600">
           Sample CSV
         </figcaption>
         <pre className="px-3 py-2.5 m-0 text-[11px] leading-relaxed font-mono text-slate-800 overflow-x-auto whitespace-pre">
           {CSV_SAMPLE}
         </pre>
-        <p className="px-3 pb-2.5 m-0 text-[10px] text-slate-500 leading-snug">
+        <p className="px-3 pb-2.5 m-0 text-[10px] text-slate-600 leading-snug">
           Aliases work too: <span className="text-slate-600">customer_name</span>,{" "}
           <span className="text-slate-600">email_address</span>, <span className="text-slate-600">phone_number</span>,{" "}
           <span className="text-slate-600">order_id</span> — matching the same fields.
@@ -129,8 +126,8 @@ export default function CsvUploadForm({
             Schedule messages after import
           </span>
           {enqueue && (
-            <span className="text-[11px] text-slate-500 pl-6 sm:pl-0 leading-snug">
-              Each send uses your default delay ({delayLabel(defaultSendDelayMinutes)}); change it in{" "}
+            <span className="text-[11px] text-slate-600 pl-6 sm:pl-0 leading-snug">
+              Each send uses your default send delay from{" "}
               <Link href="/dashboard/settings" className="font-medium text-brand-600 hover:text-brand-800">
                 Settings
               </Link>
@@ -161,12 +158,7 @@ export default function CsvUploadForm({
       {error && <div className="text-sm text-red-700 px-3 py-2 rounded-lg bg-red-50 border border-red-200">{error}</div>}
       {result && (
         <div className="text-sm px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800">
-          Imported {result.imported} / {result.rows} rows · Queued {result.queued} at {delayLabel(defaultSendDelayMinutes)} each
-          (default delay;{" "}
-          <Link href="/dashboard/settings" className="font-medium text-brand-600 hover:text-brand-800">
-            change in Settings
-          </Link>
-          )
+          Imported {result.imported} / {result.rows} rows · Queued {result.queued}
           {result.errors.length > 0 && (
             <details className="mt-2 text-amber-800">
               <summary className="cursor-pointer">{result.errors.length} warnings</summary>

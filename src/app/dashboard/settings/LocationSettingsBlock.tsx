@@ -12,12 +12,20 @@ import {
 import ReviewPlatformIcon from "@/components/ReviewPlatformIcon";
 import StyledSelect from "@/components/StyledSelect";
 import InfoTip from "@/components/InfoTip";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import UsageMeter from "@/components/UsageMeter";
+import { ButtonSpinner } from "@/components/ToastProvider";
 import { isPlatformUrlActive } from "@/lib/reviewPlatformsFromLocations";
-import type { Business, BusinessLocation, PublicConfig } from "@/types";
+import type { Business, BusinessLocation, PlanUsage, PublicConfig } from "@/types";
 
 type Props = {
   publicConfig: PublicConfig;
   onBusinessRefresh?: (r: { business: Business | null }) => void;
+  /**
+   * Plan + usage. Free plan blocks creation past the location cap; Pro is unlimited.
+   * Optional so older callers don't break, but recommended in production.
+   */
+  usage?: PlanUsage | null;
 };
 
 function StoreHeaderIcon() {
@@ -42,7 +50,7 @@ function RemoveIcon() {
   );
 }
 
-export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh }: Props) {
+export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh, usage }: Props) {
   const [locations, setLocations] = useState<BusinessLocation[]>([]);
   const [defaultId, setDefaultId] = useState<string | null>(null);
   const [err, setErr] = useState("");
@@ -51,6 +59,11 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
   const [linkEdits, setLinkEdits] = useState<Record<string, Record<string, string>>>({});
   /** Platform ids the user has opened to add; rows with no server URL yet stay until removed or saved. */
   const [openExtraSlots, setOpenExtraSlots] = useState<Record<string, string[]>>({});
+  /** True while the floating save bar is flushing pending edits across every dirty store. */
+  const [savingAll, setSavingAll] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<BusinessLocation | null>(null);
+  const [deletingLoc, setDeletingLoc] = useState(false);
 
   const otherPlatforms = (publicConfig.review_platforms || []).filter((p) => p.id !== "google");
   const googlePlatform = (publicConfig.review_platforms || []).find((p) => p.id === "google");
@@ -61,13 +74,60 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
         setLocations(r.locations);
         setDefaultId(r.default_location_id);
         setLinkEdits({});
+        setLoaded(true);
       })
-      .catch((e: Error) => setErr(e?.message || "Failed to load locations"));
+      .catch((e: Error) => {
+        setErr(e?.message || "Failed to load locations");
+        setLoaded(true);
+      });
   }, []);
 
   useEffect(() => {
     reload();
   }, [reload]);
+
+  /** Edits in `loc` that differ from what's saved on the server. */
+  const dirtyChangesFor = (loc: BusinessLocation): Record<string, string> => {
+    const edits = linkEdits[loc.id];
+    if (!edits) return {};
+    const changed: Record<string, string> = {};
+    for (const [pid, val] of Object.entries(edits)) {
+      const saved = (loc.platform_links?.[pid] || "").trim();
+      const next = (val || "").trim();
+      if (next !== saved) changed[pid] = next;
+    }
+    return changed;
+  };
+
+  const dirtyLocations = locations.filter((l) => Object.keys(dirtyChangesFor(l)).length > 0);
+  const dirtyCount = dirtyLocations.length;
+
+  const saveAllChanges = async () => {
+    if (dirtyCount === 0) return;
+    setSavingAll(true);
+    setErr("");
+    try {
+      // Sequentially flush — small N (locations are <= a handful in practice)
+      // and the API isn't transactional across stores, so a serial loop with
+      // a single error surface is the least surprising UX.
+      for (const loc of dirtyLocations) {
+        const changed = dirtyChangesFor(loc);
+        if (Object.keys(changed).length) {
+          await putMyLocationPlatformLinks(loc.id, changed);
+        }
+      }
+      await reload();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save links");
+    } finally {
+      setSavingAll(false);
+    }
+  };
+
+  const discardAllChanges = () => {
+    if (dirtyCount === 0) return;
+    setLinkEdits({});
+  };
 
   /** After refresh, only keep "draft" add-slots for platforms with no URL saved on the server yet. */
   useEffect(() => {
@@ -76,7 +136,7 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
       for (const loc of locations) {
         n[loc.id] = (prev[loc.id] || []).filter((pid) => {
           if (pid === "google") {
-            if ((loc.gmb_review_url || "").trim()) return false;
+            if ((loc.platform_links?.["google"] || "").trim()) return false;
             return true;
           }
           return !(loc.platform_links?.[pid] || "").trim();
@@ -87,14 +147,15 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
   }, [locations]);
 
   return (
+    <div className="space-y-4 sm:space-y-5">
     <section
-      className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white/90 shadow-[0_1px_0_rgba(15,23,42,0.04),0_12px_32px_-8px_rgba(15,23,42,0.08)]"
+      className="overflow-hidden rounded-2xl border border-slate-200 bg-white/90 shadow-[0_1px_0_rgba(15,23,42,0.04),0_12px_32px_-8px_rgba(15,23,42,0.08)]"
       id="store-locations"
     >
-      <div className="border-b border-slate-100/90 bg-gradient-to-r from-slate-50/95 via-white to-slate-50/30">
+      <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50/95 via-white to-slate-50/30">
         <div className="flex items-start justify-between gap-2 px-4 py-3.5 sm:px-6 sm:py-4">
           <div className="flex min-w-0 flex-1 gap-3.5">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200/60 bg-slate-50/80 text-slate-600">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600">
               <StoreHeaderIcon />
             </div>
             <div className="min-w-0">
@@ -109,8 +170,8 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
                 </InfoTip>
               </div>
               <p className="mt-0.5 text-sm leading-relaxed text-slate-500">
-                Add a store with a name, then add whichever public review links you use in that store&rsquo;s block —
-                same for new or existing stores; each field saves when you leave it.
+                Add a store with a name, then add whichever public review links you use in that store&rsquo;s block.
+                Edits across every store stay local until you press <strong className="text-slate-700">Save changes</strong>.
               </p>
             </div>
           </div>
@@ -119,9 +180,22 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
       <div className="p-5 sm:p-6">
         {err && <p className="mb-3 text-sm text-red-700 rounded-xl border border-red-200/60 bg-red-50/50 px-3 py-2">{err}</p>}
 
+        {/* Free-plan single-store meter. Pro users (limit === null) see nothing. */}
+        {usage && usage.limits.locations !== null && (
+          <div className="mb-4">
+            <UsageMeter
+              label="Stores"
+              used={usage.used.locations_total}
+              limit={usage.limits.locations}
+              hint={`Free plan supports ${usage.limits.locations} store. Upgrade to Pro for unlimited stores.`}
+              inline
+            />
+          </div>
+        )}
+
         <div className="space-y-4">
         {locations.map((loc) => (
-          <div key={loc.id} className="space-y-2 rounded-2xl border border-slate-200/60 bg-slate-50/30 p-4">
+          <div key={loc.id} className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <div className="font-semibold text-slate-800">
                 {loc.name}
@@ -158,21 +232,7 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
                     type="button"
                     className="text-xs text-red-700 hover:underline"
                     disabled={busy}
-                    onClick={async () => {
-                      if (!confirm(`Delete "${loc.name}"?`)) return;
-                      setBusy(true);
-                      setErr("");
-                      try {
-                        await deleteMyLocation(loc.id);
-                        const br = await getMyBusiness();
-                        onBusinessRefresh?.(br);
-                        await reload();
-                      } catch (e) {
-                        setErr(e instanceof Error ? e.message : "Could not delete");
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
+                    onClick={() => setDeleteTarget(loc)}
                   >
                     Delete
                   </button>
@@ -210,7 +270,7 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
                         return (
                           <div
                             key={p.id}
-                            className="rounded-xl border border-slate-200/60 bg-slate-50/40 p-2.5 space-y-1.5"
+                            className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 space-y-1.5"
                           >
                             <div className="flex items-center justify-between gap-2 min-w-0">
                               <div className="flex items-center gap-2 min-w-0">
@@ -270,20 +330,6 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
                                   [loc.id]: { ...m[loc.id], [p.id]: e.target.value },
                                 }));
                               }}
-                              onBlur={async (e) => {
-                                const v = e.target.value.trim();
-                                if (v === (loc.platform_links?.[p.id] || "")) return;
-                                setBusy(true);
-                                setErr("");
-                                try {
-                                  await putMyLocationPlatformLinks(loc.id, { [p.id]: v || "" });
-                                  await reload();
-                                } catch (err2) {
-                                  setErr(err2 instanceof Error ? err2.message : "Could not save link");
-                                } finally {
-                                  setBusy(false);
-                                }
-                              }}
                             />
                           </div>
                         );
@@ -291,7 +337,7 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
                     </div>
                   ) : null}
                   {visibleGoogle && (
-                    <div className="rounded-xl border border-slate-200/60 bg-slate-50/40 p-2.5 space-y-1.5">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 space-y-1.5">
                       <div className="flex items-center justify-between gap-2 min-w-0">
                         <div className="flex items-center gap-2 min-w-0">
                           <ReviewPlatformIcon platformId="google" size="md" />
@@ -320,8 +366,8 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
                               setBusy(true);
                               setErr("");
                               try {
-                                if ((loc.gmb_review_url || "").trim() !== "" || isPlatformUrlActive("google", loc)) {
-                                  await patchMyLocation(loc.id, { gmb_review_url: "" });
+                                if (isPlatformUrlActive("google", loc)) {
+                                  await putMyLocationPlatformLinks(loc.id, { google: "" });
                                   await reload();
                                 }
                                 setOpenExtraSlots((m) => ({
@@ -330,7 +376,7 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
                                 }));
                                 setLinkEdits((m) => {
                                   const row = { ...m[loc.id] };
-                                  delete row.gmb;
+                                  delete row.google;
                                   return { ...m, [loc.id]: row };
                                 });
                               } catch (e2) {
@@ -348,28 +394,12 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
                       <input
                         className="input text-sm w-full"
                         placeholder="https://g.page/… or https://www.google.com/maps/…"
-                        value={linkEdits[loc.id]?.gmb ?? loc.gmb_review_url ?? ""}
+                        value={linkEdits[loc.id]?.google ?? loc.platform_links?.["google"] ?? ""}
                         onChange={(e) => {
                           setLinkEdits((m) => ({
                             ...m,
-                            [loc.id]: { ...m[loc.id], gmb: e.target.value },
+                            [loc.id]: { ...m[loc.id], google: e.target.value },
                           }));
-                        }}
-                        onBlur={async (e) => {
-                          const v = e.target.value.trim();
-                          if (v === (loc.gmb_review_url || "")) return;
-                          setBusy(true);
-                          setErr("");
-                          try {
-                            await patchMyLocation(loc.id, { gmb_review_url: v });
-                            const br = await getMyBusiness();
-                            onBusinessRefresh?.(br);
-                            await reload();
-                          } catch (err2) {
-                            setErr(err2 instanceof Error ? err2.message : "Could not save");
-                          } finally {
-                            setBusy(false);
-                          }
                         }}
                       />
                     </div>
@@ -379,7 +409,7 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
                       <label className="block text-xs font-medium text-slate-600 mb-1" htmlFor={`add-site-${loc.id}`}>
                         Add a review site
                       </label>
-                      <div className="rounded-xl border border-slate-200/70 bg-slate-50/50 p-1.5 shadow-sm shadow-slate-900/[0.02]">
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-1.5 shadow-sm shadow-slate-900/[0.02]">
                         <StyledSelect
                           id={`add-site-${loc.id}`}
                           className="!h-9 !min-h-0 !py-2 text-sm !border-0 !bg-white/90 !ring-0 !shadow-none"
@@ -391,7 +421,7 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
                             if (v === "google") {
                               setOpenExtraSlots((m) => {
                                 const ex = m[loc.id] || [];
-                                if ((loc.gmb_review_url || "").trim() || ex.includes("google")) return m;
+                                if (ex.includes("google") || isPlatformUrlActive("google", loc)) return m;
                                 return { ...m, [loc.id]: [...ex, "google"] };
                               });
                               e.target.value = "";
@@ -424,11 +454,22 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
               );
             })()}
             </div>
+            {Object.keys(dirtyChangesFor(loc)).length > 0 && (
+              <p className="border-t border-slate-200 pt-2.5 -mx-1 text-[11px] font-medium text-warm-700">
+                Unsaved changes — use the Save changes bar below.
+              </p>
+            )}
           </div>
         ))}
+        {!loaded && (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="h-5 w-40 rounded bg-slate-200/80 animate-pulse" />
+            <div className="mt-3 h-9 w-full rounded bg-slate-200/60 animate-pulse" />
+          </div>
+        )}
       </div>
 
-        <div className="mt-6 border-t border-slate-200/80 pt-5">
+        <div className="mt-6 border-t border-slate-200 pt-5">
         <div className="text-sm font-semibold text-slate-800">Add a store</div>
         <p className="mt-0.5 text-xs text-slate-500 mb-3 max-w-2xl">
           Enter a name and add the store, then in <strong>Public review links</strong> use <em>Add a review site</em> to
@@ -447,32 +488,119 @@ export default function LocationSettingsBlock({ publicConfig, onBusinessRefresh 
               onChange={(e) => setNewName(e.target.value)}
             />
           </div>
-        <button
-          type="button"
-          className="btn-primary sm:mb-0.5 h-10 min-h-10 w-full sm:w-auto px-4 shrink-0"
-          disabled={busy || !newName.trim()}
-          onClick={async () => {
-            setBusy(true);
-            setErr("");
-            const name = newName.trim();
-            try {
-              await createMyLocation({ name });
-              setNewName("");
-              const br = await getMyBusiness();
-              onBusinessRefresh?.(br);
-              await reload();
-            } catch (e) {
-              setErr(e instanceof Error ? e.message : "Could not save");
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          Add store
-        </button>
+        {(() => {
+          const locLimit = usage?.limits?.locations ?? null;
+          const locUsed = usage?.used?.locations_total ?? 0;
+          const atCap = locLimit !== null && locUsed >= locLimit;
+          return (
+            <button
+              type="button"
+              className="btn-primary sm:mb-0.5 h-10 min-h-10 w-full sm:w-auto px-4 shrink-0 disabled:opacity-60 disabled:cursor-not-allowed"
+              disabled={busy || !newName.trim() || atCap}
+              title={
+                atCap
+                  ? `Free plan supports ${locLimit} store. Upgrade to Pro for unlimited stores.`
+                  : undefined
+              }
+              onClick={async () => {
+                setBusy(true);
+                setErr("");
+                const name = newName.trim();
+                try {
+                  await createMyLocation({ name });
+                  setNewName("");
+                  const br = await getMyBusiness();
+                  onBusinessRefresh?.(br);
+                  await reload();
+                } catch (e) {
+                  setErr(e instanceof Error ? e.message : "Could not save");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {atCap ? "Upgrade to add more" : "Add store"}
+            </button>
+          );
+        })()}
         </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title={`Delete "${deleteTarget?.name ?? ""}"?`}
+        body={
+          <p>
+            Removing this store also clears its public review links. Contacts assigned to it stay in
+            your list but lose the per-store routing.
+          </p>
+        }
+        confirmLabel="Delete store"
+        tone="danger"
+        busy={deletingLoc}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setDeletingLoc(true);
+          setErr("");
+          try {
+            await deleteMyLocation(deleteTarget.id);
+            const br = await getMyBusiness();
+            onBusinessRefresh?.(br);
+            await reload();
+            setDeleteTarget(null);
+          } catch (e) {
+            setErr(e instanceof Error ? e.message : "Could not delete");
+          } finally {
+            setDeletingLoc(false);
+          }
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </section>
+
+    {/* Floating save bar — mirrors the Profile tab's footer. Only renders when at
+        least one store has unsaved link edits, so it stays out of the way otherwise. */}
+    {dirtyCount > 0 && (
+      <div className="sm:sticky sm:bottom-4 z-10">
+        <div className="overflow-hidden rounded-2xl border border-warm-200/70 bg-white/95 shadow-card-hover backdrop-blur supports-[backdrop-filter]:bg-white/85">
+          <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5">
+            <p className="min-w-0 text-sm text-slate-700">
+              You have unsaved review-link changes in{" "}
+              <span className="font-semibold text-slate-900">
+                {dirtyCount} {dirtyCount === 1 ? "store" : "stores"}
+              </span>
+              . They&apos;ll save together when you press Save changes.
+            </p>
+            <div className="flex items-center justify-end gap-2 shrink-0">
+              <button
+                type="button"
+                className="text-sm text-slate-600 hover:text-slate-900 px-2 h-11"
+                disabled={savingAll}
+                onClick={discardAllChanges}
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                disabled={savingAll}
+                onClick={() => void saveAllChanges()}
+                className="btn-primary h-11 shrink-0 px-6 w-full sm:w-auto font-semibold"
+              >
+                {savingAll ? (
+                  <>
+                    <ButtonSpinner />
+                    Saving…
+                  </>
+                ) : (
+                  "Save changes"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+    </div>
   );
 }

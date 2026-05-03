@@ -1,6 +1,5 @@
 "use client";
 
-import type { ReactNode } from "react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -16,47 +15,24 @@ import {
   revokeWebhookKey,
 } from "@/lib/api";
 import { ButtonSpinner, useAppToast } from "@/components/ToastProvider";
-import ActiveReviewPlatformsStrip from "@/components/ActiveReviewPlatformsStrip";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import QrStyleGallery, { QrStyleGallerySkeleton } from "@/components/QrStyleGallery";
 import PreviewCustomerPageLinks from "@/components/PreviewCustomerPageLinks";
 import DashboardPageHeader from "@/components/DashboardPageHeader";
-import InfoTip from "@/components/InfoTip";
 import StyledSelect from "@/components/StyledSelect";
-import { activePlatformChips } from "@/lib/reviewPlatformsFromLocations";
+import Tabs from "@/components/Tabs";
+import Disclosure from "@/components/Disclosure";
 import type { BusinessLocation, WebhookKeyRecord } from "@/types";
 
-function ConnectBlock({
-  title,
-  description,
-  children,
-  info,
-  infoLabel = "More about this section",
-}: {
-  title: string;
-  description: ReactNode;
-  children: ReactNode;
-  info?: ReactNode;
-  infoLabel?: string;
-}) {
-  return (
-    <section className="card p-5 sm:p-6 space-y-4">
-      <div className="max-w-2xl space-y-1.5">
-        <div className="flex items-center gap-1.5">
-          <h2 className="text-base font-semibold text-slate-900">{title}</h2>
-          {info ? (
-            <InfoTip size="md" label={infoLabel}>
-              {info}
-            </InfoTip>
-          ) : null}
-        </div>
-        <p className="text-sm text-slate-600 leading-relaxed line-clamp-2">{description}</p>
-      </div>
-      {children}
-    </section>
-  );
-}
+type ConnectTab = "link" | "qr" | "api";
 
+/**
+ * Connect — public sign-up + QR + ingest API. Redesigned around three tabs so the user
+ * sees, in one glance, exactly what this page can do. Each tab has ONE primary action.
+ */
 export default function QrPage() {
+  const [tab, setTab] = useState<ConnectTab>("link");
+
   const [info, setInfo] = useState<Awaited<ReturnType<typeof getQrInfo>> | null>(null);
   const [qrLoading, setQrLoading] = useState(true);
   const [brandColor, setBrandColor] = useState<string | null>(null);
@@ -66,14 +42,14 @@ export default function QrPage() {
   const [busy, setBusy] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [creditBalance, setCreditBalance] = useState<number | undefined>(undefined);
-  const [publicCfg, setPublicCfg] = useState<Awaited<ReturnType<typeof getPublicConfig>> | null>(null);
+  const [, setPublicCfg] = useState<Awaited<ReturnType<typeof getPublicConfig>> | null>(null);
   const [locations, setLocations] = useState<BusinessLocation[]>([]);
   const [defaultLocationId, setDefaultLocationId] = useState<string | null>(null);
   const [storeId, setStoreId] = useState<string | null>(null);
   const storeIdRef = useRef<string | null>(null);
+  const [revokeKey, setRevokeKey] = useState<WebhookKeyRecord | null>(null);
+  const [revoking, setRevoking] = useState(false);
   const toast = useAppToast();
-
-  const platformChips = useMemo(() => activePlatformChips(locations, publicCfg), [locations, publicCfg]);
 
   const chooseStoreForList = (list: BusinessLocation[], defId: string | null, preferred: string | null) => {
     if (!list.length) return null;
@@ -117,157 +93,280 @@ export default function QrPage() {
   }, []);
 
   useEffect(() => {
-    refresh().catch(() => {});
+    refresh().catch((e: unknown) => {
+      // Used to silently swallow load failures; surface the issue so users
+      // know the QR / webhooks panel didn't actually load.
+      const msg = e instanceof Error ? e.message : "Could not load this page.";
+      toast.error(msg);
+    });
+    // toast is stable; intentionally excluded from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh]);
+
+  const tabItems = useMemo(
+    () =>
+      [
+        { value: "link" as const, label: "Sign-up link" },
+        { value: "qr" as const, label: "QR & poster" },
+        { value: "api" as const, label: "Webhooks", badge: keys.filter((k) => !k.revoked_at).length || undefined },
+      ],
+    [keys],
+  );
 
   return (
     <div className="max-w-3xl space-y-6">
       <DashboardPageHeader
-        eyebrow="Ingest & links"
+        eyebrow="Bring people in"
         title="Connect"
         credits={creditBalance}
-        description="Sign-up link, QR, print layout, test links, and webhooks into your list."
-        info={{
-          label: "What Connect is for",
-          size: "md",
-          children: (
-            <p>
-              One place for your public sign-up page, printable QR, test links to the review flow, and webhooks so other
-              systems can add contacts. Everyone who opts in (or is ingested) shows up in{" "}
-              <Link href="/dashboard/contacts" className="font-medium text-brand-600 hover:underline">
-                People
-              </Link>{" "}
-              — same list as add/import there.
-            </p>
-          ),
-        }}
+        description="One public link, printable QR codes, and an HTTP webhook — all routes into your People list."
       />
 
-      {publicCfg && <ActiveReviewPlatformsStrip platforms={platformChips} className="max-w-3xl" />}
+      <Tabs items={tabItems} value={tab} onChange={setTab} ariaLabel="Connect sections" />
 
-      <ConnectBlock
-        title="Your public sign-up page"
-        description={
-          locations.length > 0
-            ? "Pick which store the link and QRs are for; review buttons on the page use that store's Google and other review URLs."
-            : "The URL people open to opt in; every QR below encodes the same address."
-        }
-        infoLabel="Your public sign-up page"
-        info={
+      {tab === "link" ? (
+        <SignUpLinkTab
+          qrLoading={qrLoading}
+          info={info}
+          locations={locations}
+          defaultLocationId={defaultLocationId}
+          storeId={storeId}
+          onChangeStore={async (v) => {
+            storeIdRef.current = v;
+            setStoreId(v);
+            setQrLoading(true);
+            try {
+              const qr = await getQrInfo({ locationId: v });
+              setInfo(qr);
+            } catch {
+              await refresh();
+            } finally {
+              setQrLoading(false);
+            }
+          }}
+          linkCopied={linkCopied}
+          onCopy={async () => {
+            if (!info?.url) return;
+            try {
+              await navigator.clipboard.writeText(info.url);
+              setLinkCopied(true);
+              window.setTimeout(() => setLinkCopied(false), 2000);
+            } catch {
+              /* ignore */
+            }
+          }}
+        />
+      ) : null}
+
+      {tab === "qr" ? (
+        <QrTab
+          qrLoading={qrLoading}
+          info={info}
+          brandColor={brandColor}
+          locations={locations}
+          storeId={storeId}
+        />
+      ) : null}
+
+      {tab === "api" ? (
+        <WebhooksTab
+          keys={keys}
+          busy={busy}
+          newLabel={newLabel}
+          createdKey={createdKey}
+          onLabelChange={setNewLabel}
+          onCreate={async () => {
+            setBusy(true);
+            try {
+              const out = await createWebhookKey(newLabel || "default");
+              setCreatedKey(out.key);
+              setNewLabel("");
+              await refresh();
+              toast.success("Key created — copy and store it now");
+            } finally {
+              setBusy(false);
+            }
+          }}
+          onDismissCreated={() => setCreatedKey(null)}
+          onRevoke={(k) => setRevokeKey(k)}
+        />
+      ) : null}
+
+      <ConfirmDialog
+        open={revokeKey !== null}
+        title={`Revoke "${revokeKey?.label ?? ""}"?`}
+        body={
           <p>
-            This page collects details and then sends them through your review request flow. All QRs in the gallery
-            use the same URL as the copy field — for multiple stores, choose the store so each place gets the right
-            review links. Check the page in a new tab before you print, and copy the link when you share by email or
-            social instead of a QR image.
+            Any system using this key will stop being able to ingest contacts. You can generate a new
+            key at any time.
           </p>
         }
-      >
-        {qrLoading ? (
-          <div className="animate-pulse space-y-3 max-w-2xl">
-            <div className="h-10 rounded-lg bg-slate-200/80" />
-            <div className="h-10 w-40 rounded-lg bg-slate-200/60" />
-          </div>
-        ) : info?.url ? (
-          <div className="space-y-3 max-w-2xl">
-            {locations.length > 0 ? (
-              <div>
-                <label className="label" htmlFor="connect-store">
-                  Store
-                </label>
-                <StyledSelect
-                  id="connect-store"
-                  className="max-w-md"
-                  value={storeId || ""}
-                  onChange={async (e) => {
-                    const v = e.target.value;
-                    if (!v) return;
-                    storeIdRef.current = v;
-                    setStoreId(v);
-                    setQrLoading(true);
-                    try {
-                      const qr = await getQrInfo({ locationId: v });
-                      setInfo(qr);
-                    } catch {
-                      /* refresh full state on error */
-                      await refresh();
-                    } finally {
-                      setQrLoading(false);
-                    }
-                  }}
-                >
-                  {locations.map((loc) => (
-                    <option key={loc.id} value={loc.id}>
-                      {loc.name}
-                      {loc.is_default || loc.id === defaultLocationId ? " (default)" : ""}
-                    </option>
-                  ))}
-                </StyledSelect>
-                <p className="text-xs text-slate-500 mt-1.5 max-w-md">
-                  Change store to get a different public link; opt-ins are tagged to that store when the page includes{" "}
-                  <code className="text-[0.65rem] px-0.5 bg-slate-100 rounded">?l=…</code> in the URL.
-                </p>
-              </div>
-            ) : null}
-            <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 font-mono text-xs text-slate-800 break-all">
-              {info.url}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <a href={info.url} target="_blank" rel="noreferrer" className="btn-primary text-sm inline-flex h-10 px-4">
-                Open in new tab
-              </a>
-              <button
-                type="button"
-                className="btn-secondary text-sm h-10 px-4"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(info.url);
-                    setLinkCopied(true);
-                    window.setTimeout(() => setLinkCopied(false), 2000);
-                  } catch {
-                    /* ignore */
-                  }
+        confirmLabel="Revoke key"
+        tone="danger"
+        busy={revoking}
+        onConfirm={async () => {
+          if (!revokeKey) return;
+          setRevoking(true);
+          try {
+            await revokeWebhookKey(revokeKey.id);
+            await refresh();
+            toast.success("Key revoked");
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "Could not revoke key");
+          } finally {
+            setRevoking(false);
+            setRevokeKey(null);
+          }
+        }}
+        onCancel={() => setRevokeKey(null)}
+      />
+    </div>
+  );
+}
+
+/* ------------------------- Sign-up link tab ------------------------- */
+
+function SignUpLinkTab({
+  qrLoading,
+  info,
+  locations,
+  defaultLocationId,
+  storeId,
+  onChangeStore,
+  linkCopied,
+  onCopy,
+}: {
+  qrLoading: boolean;
+  info: { url?: string } | null;
+  locations: BusinessLocation[];
+  defaultLocationId: string | null;
+  storeId: string | null;
+  onChangeStore: (v: string) => void;
+  linkCopied: boolean;
+  onCopy: () => void;
+}) {
+  return (
+    <section className="card p-5 sm:p-6 space-y-5">
+      <div className="space-y-1">
+        <h2 className="text-base font-semibold text-slate-900">Your public sign-up link</h2>
+        <p className="text-sm text-slate-600 leading-relaxed">
+          Share this URL anywhere — every QR below points to it. Visitors who opt in land in{" "}
+          <Link href="/dashboard/contacts" className="font-medium text-brand-600 hover:underline">
+            People
+          </Link>
+          .
+        </p>
+      </div>
+
+      {qrLoading ? (
+        <div className="animate-pulse space-y-3">
+          <div className="h-10 rounded-lg bg-slate-200/80" />
+          <div className="h-10 w-44 rounded-lg bg-slate-200/60" />
+        </div>
+      ) : info?.url ? (
+        <>
+          {locations.length > 0 ? (
+            <div>
+              <label className="label" htmlFor="connect-store">
+                Store
+              </label>
+              <StyledSelect
+                id="connect-store"
+                className="max-w-md"
+                value={storeId || ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v) onChangeStore(v);
                 }}
               >
-                {linkCopied ? "Copied" : "Copy link"}
-              </button>
+                {locations.map((loc) => (
+                  <option key={loc.id} value={loc.id}>
+                    {loc.name}
+                    {loc.is_default || loc.id === defaultLocationId ? " (default)" : ""}
+                  </option>
+                ))}
+              </StyledSelect>
+              <p className="text-xs text-slate-500 mt-1.5">
+                Each store has its own review URLs.
+              </p>
             </div>
-          </div>
-        ) : (
-          <p className="text-sm text-slate-600">Link could not be loaded. Try refreshing the page.</p>
-        )}
-      </ConnectBlock>
+          ) : null}
 
-      <ConnectBlock
-        title="Preview: review link page"
-        description="The /r/… link from a message (not the public form above) — use after a test send."
-        infoLabel="Preview vs public sign-up"
-        info={
-          <p>
-            The links here are the personalized <strong>review</strong> URLs from outgoing messages, not the Connect
-            sign-up page. After you message yourself, open the same link a real customer would get. Some flows may show
-            only the private feedback form, depending on your send.
-          </p>
-        }
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 font-mono text-xs text-slate-800 break-all">
+            {info.url}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={info.url}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-primary inline-flex h-10 px-5 text-sm"
+            >
+              Open page
+            </a>
+            <button type="button" className="btn-secondary text-sm h-10 px-4" onClick={onCopy}>
+              {linkCopied ? "Copied" : "Copy link"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="text-sm text-slate-600">Link could not be loaded. Try refreshing the page.</p>
+      )}
+
+      <Disclosure
+        label="Test the personalised review link"
+        hint="Send yourself a real review request to see what customers experience"
       >
         <PreviewCustomerPageLinks compact />
-      </ConnectBlock>
+      </Disclosure>
+    </section>
+  );
+}
 
-      <ConnectBlock
-        title="QR designs"
-        description={
-          locations.length > 0
-            ? "For the store selected above — each code opens that store's public page and review links."
-            : "Choose a look and download PNG; use SVG for large or editable art."
-        }
-        infoLabel="QR styles and formats"
-        info={
-          <p>
-            Each card is a different module and edge shape, not just a new colour. Download a PNG for each style. The
-            vector <strong>SVG</strong> below is one default pattern you can scale for windows or design tools, or use the
-            <strong> Brand</strong> tile to match your dashboard colour.
+/* ----------------------------- QR tab ----------------------------- */
+
+function QrTab({
+  qrLoading,
+  info,
+  brandColor,
+  locations,
+  storeId,
+}: {
+  qrLoading: boolean;
+  info: { url?: string } | null;
+  brandColor: string | null;
+  locations: BusinessLocation[];
+  storeId: string | null;
+}) {
+  return (
+    <div className="space-y-6">
+      <section className="card p-5 sm:p-6 space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1 min-w-0">
+            <h2 className="text-base font-semibold text-slate-900">Print a poster or counter card</h2>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Pre-built layout with your name and QR. Print it or save as PDF — recommended for shop
+              floors.
+            </p>
+          </div>
+          <Link
+            href={storeId ? `/dashboard/qr/print?l=${encodeURIComponent(storeId)}` : "/dashboard/qr/print"}
+            className="btn-primary inline-flex h-10 px-5 text-sm shrink-0"
+          >
+            Open print layout
+          </Link>
+        </div>
+      </section>
+
+      <section className="card p-5 sm:p-6 space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-base font-semibold text-slate-900">QR designs</h2>
+          <p className="text-sm text-slate-600 leading-relaxed">
+            Pick a style and download as PNG. Use SVG for large prints or design tools.
           </p>
-        }
-      >
+        </div>
+
         <div className="min-h-0">
           {qrLoading ? (
             <QrStyleGallerySkeleton />
@@ -277,17 +376,11 @@ export default function QrPage() {
             <p className="text-sm text-slate-600 py-6">QR codes could not be generated. Try refreshing the page.</p>
           )}
         </div>
-        <div className="rounded-xl border border-slate-200/90 bg-slate-50/60 px-4 py-3.5 space-y-2 max-w-2xl">
-          <div className="flex items-center gap-1.5">
-            <div className="text-sm font-medium text-slate-900">Download SVG (vector)</div>
-            <InfoTip size="md" label="When to use the SVG file">
-              <p>
-                One file that stays sharp at any size — for shop windows, banners, or Canva, Affinity, Adobe, etc. It
-                is a single system style. Use the gallery PNGs when you need a specific built-in look.
-              </p>
-            </InfoTip>
-          </div>
-          <p className="text-sm text-slate-600 line-clamp-2">Scales cleanly for big prints; PNG gallery above is for a fixed on-brand style.</p>
+
+        <Disclosure label="Download SVG (vector)" hint="For very large prints, banners, or editing in design tools">
+          <p className="text-sm text-slate-600 mb-3">
+            One scalable file. Use the gallery PNGs above for a fixed on-brand style.
+          </p>
           <button
             type="button"
             className="btn-secondary text-sm disabled:opacity-50"
@@ -296,134 +389,127 @@ export default function QrPage() {
               const blob = await fetchMyQrSvg(locations.length ? storeId : null);
               const a = document.createElement("a");
               a.href = URL.createObjectURL(blob);
-              a.download = "reviewloop-qr.svg";
+              a.download = "goodword-qr.svg";
               a.click();
               URL.revokeObjectURL(a.href);
             }}
           >
             Download SVG
           </button>
-        </div>
-      </ConnectBlock>
+        </Disclosure>
+      </section>
+    </div>
+  );
+}
 
-      <ConnectBlock
-        title="Poster and counter card"
-        description="Name, QR, and short line — pick size and theme, then print or PDF."
-        infoLabel="Print layout"
-        info={
-          <p>One print-ready layout. Choose the paper or card size and colour theme, then use your browser to print or save as PDF.</p>
-        }
-      >
-        <div>
-          <Link
-            href={storeId ? `/dashboard/qr/print?l=${encodeURIComponent(storeId)}` : "/dashboard/qr/print"}
-            className="btn-primary inline-flex"
-          >
-            Open print layout
-          </Link>
-        </div>
-      </ConnectBlock>
+/* --------------------------- Webhooks tab --------------------------- */
 
-      <ConnectBlock
-        title="Webhooks & sample request"
-        description="Create a key, then POST to ingest with the same header. Example payload below."
-        infoLabel="HTTP ingest: keys, headers, and body"
-        info={
-          <div className="space-y-2">
-            <p>
-              Create a key here and send it as{" "}
-              <code className="px-0.5 rounded bg-slate-100 text-[0.7rem]">X-ReviewLoop-Key</code> on <strong>every</strong>{" "}
-              request to the ingest URL (same URL as the sample). Typical sources: POS, your server, or Zapier.
-            </p>
-            <p>
-              <code className="px-0.5 rounded bg-slate-100 text-[0.7rem]">delay_minutes</code> and{" "}
-              <code className="px-0.5 rounded bg-slate-100 text-[0.7rem]">channel</code> control timing and email vs
-              SMS where that applies. Use optional{" "}
-              <code className="px-0.5 rounded bg-slate-100 text-[0.7rem]">location_id</code> to tag the person to a
-              store (use a store id from <Link href="/dashboard/settings">Settings → Store locations</Link>).
-              In <strong>Zapier</strong>, use &quot;Webhooks by Zapier&quot; to POST the same JSON body shape.
-            </p>
-          </div>
-        }
-      >
-        <div className="flex flex-col sm:flex-row gap-2 sm:items-stretch max-w-xl">
-          <input
-            className="input flex-1"
-            placeholder="Key label (e.g. Square POS)"
-            value={newLabel}
-            onChange={(e) => setNewLabel(e.target.value)}
-          />
+function WebhooksTab({
+  keys,
+  busy,
+  newLabel,
+  createdKey,
+  onLabelChange,
+  onCreate,
+  onDismissCreated,
+  onRevoke,
+}: {
+  keys: WebhookKeyRecord[];
+  busy: boolean;
+  newLabel: string;
+  createdKey: string | null;
+  onLabelChange: (v: string) => void;
+  onCreate: () => void;
+  onDismissCreated: () => void;
+  onRevoke: (k: WebhookKeyRecord) => void;
+}) {
+  return (
+    <section className="card p-5 sm:p-6 space-y-5">
+      <div className="space-y-1">
+        <h2 className="text-base font-semibold text-slate-900">Ingest contacts via HTTP</h2>
+        <p className="text-sm text-slate-600 leading-relaxed">
+          POST a JSON body and GoodWord adds the person to your list — useful for POS integrations,
+          Zapier, or your own backend.
+        </p>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-2 sm:items-stretch">
+        <input
+          className="input flex-1"
+          placeholder="Key label (e.g. Square POS)"
+          value={newLabel}
+          onChange={(e) => onLabelChange(e.target.value)}
+        />
+        <button
+          disabled={busy}
+          onClick={onCreate}
+          className="btn-primary sm:w-44 inline-flex items-center justify-center gap-2 h-10 text-sm"
+        >
+          {busy ? (
+            <>
+              <ButtonSpinner />
+              Generating…
+            </>
+          ) : (
+            "Generate key"
+          )}
+        </button>
+      </div>
+
+      {createdKey ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3.5 text-sm">
+          <div className="font-semibold text-amber-950">Save this key now — you will not see it again</div>
+          <code className="block mt-2 text-xs break-all text-amber-900 font-mono">{createdKey}</code>
           <button
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                const out = await createWebhookKey(newLabel || "default");
-                setCreatedKey(out.key);
-                setNewLabel("");
-                await refresh();
-                toast.success("Key created — copy and store it now");
-              } finally {
-                setBusy(false);
-              }
-            }}
-            className="btn-primary sm:w-36 inline-flex items-center justify-center gap-2"
+            type="button"
+            onClick={onDismissCreated}
+            className="text-xs text-amber-800 mt-2 underline font-medium"
           >
-            {busy ? (
-              <>
-                <ButtonSpinner />
-                Generating…
-              </>
-            ) : (
-              "Generate key"
-            )}
+            Dismiss
           </button>
         </div>
+      ) : null}
 
-        {createdKey && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2.5 text-sm max-w-2xl">
-            <div className="font-medium text-amber-950">Save this key now — you will not see it again</div>
-            <code className="block mt-2 text-xs break-all text-amber-900">{createdKey}</code>
-            <button type="button" onClick={() => setCreatedKey(null)} className="text-xs text-amber-800/90 mt-2 underline">
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {keys.length === 0 ? (
-          <p className="text-sm text-slate-500">No keys yet</p>
-        ) : (
-          <ul className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden max-w-2xl">
-            {keys.map((k) => (
-              <li key={k.id} className="flex items-center justify-between gap-3 text-sm py-2.5 px-3 bg-white">
-                <div>
-                  <span className="font-medium text-slate-800">{k.label}</span>
-                  <span className="ml-2 text-slate-400 text-xs font-mono">{k.key_prefix}…</span>
-                  {k.revoked_at && <span className="ml-2 pill bg-slate-100 text-slate-500 text-[10px]">revoked</span>}
-                </div>
-                {!k.revoked_at && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!confirm(`Revoke key "${k.label}"?`)) return;
-                      await revokeWebhookKey(k.id);
-                      refresh();
-                    }}
-                    className="text-xs text-red-600 hover:text-red-800 shrink-0"
-                  >
-                    Revoke
-                  </button>
+      {keys.length === 0 ? (
+        <p className="text-sm text-slate-500">No keys yet — generate your first to start sending requests.</p>
+      ) : (
+        <ul className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+          {keys.map((k) => (
+            <li key={k.id} className="flex items-center justify-between gap-3 text-sm py-2.5 px-3.5 bg-white">
+              <div className="min-w-0">
+                <span className="font-semibold text-slate-800">{k.label}</span>
+                <span className="ml-2 text-slate-400 text-xs font-mono">{k.key_prefix}…</span>
+                {k.revoked_at && (
+                  <span className="ml-2 pill bg-slate-100 text-slate-500 text-[10px]">revoked</span>
                 )}
-              </li>
-            ))}
-          </ul>
-        )}
+              </div>
+              {!k.revoked_at && (
+                <button
+                  type="button"
+                  onClick={() => onRevoke(k)}
+                  className="text-xs font-semibold text-red-600 hover:text-red-800 shrink-0"
+                >
+                  Revoke
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
 
-        <div className="pt-2 border-t border-slate-200/80 max-w-2xl">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2.5">Sample request</h3>
+      <Disclosure label="Sample request" hint="POST shape, headers and required fields">
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">
+            Send the key as <code className="px-1 rounded bg-slate-100 text-[11px]">X-GoodWord-Key</code> on
+            every request. Use{" "}
+            <Link href="/dashboard/settings" className="font-medium text-brand-600 hover:underline">
+              Settings → Store locations
+            </Link>{" "}
+            to find a store id for the optional <code className="px-1 rounded bg-slate-100 text-[11px]">location_id</code>.
+          </p>
           <pre className="text-xs text-slate-200 bg-slate-900 rounded-lg p-4 overflow-x-auto">
-{`POST ${PUBLIC_API_BASE}/api/reviewloop/ingest
-X-ReviewLoop-Key: rl_•••
+{`POST ${PUBLIC_API_BASE}/api/goodword/ingest
+X-GoodWord-Key: rl_•••
 Content-Type: application/json
 
 {
@@ -433,12 +519,11 @@ Content-Type: application/json
   "external_ref": "order_12345",
   "location_id": "your-store-uuid-optional",
   "channel": "auto",
-  "consent": true,
-  "delay_minutes": 60
+  "consent": true
 }`}
           </pre>
         </div>
-      </ConnectBlock>
-    </div>
+      </Disclosure>
+    </section>
   );
 }

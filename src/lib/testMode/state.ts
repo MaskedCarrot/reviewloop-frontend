@@ -8,6 +8,7 @@ import type {
   FeedbackEntry,
   ScheduledMessage,
   StorePerformanceRow,
+  Template,
   User,
   WebhookKeyRecord,
 } from "@/types";
@@ -41,7 +42,12 @@ export type LinkRow = {
 export type TestModeState = {
   user: User;
   business: Business;
+  /** Message templates (simple body/subject). */
+  templates: Template[];
+  /** Multi-step campaigns. */
   campaigns: Campaign[];
+  /** Tracks which location is the default for the business. */
+  default_location_id: string | null;
   contacts: Contact[];
   messages: ScheduledMessage[];
   links: LinkRow[];
@@ -78,23 +84,27 @@ export function createSeedState(): TestModeState {
       id: SEED_LOC_MAIN,
       business_id: TEST_BUSINESS_ID,
       name: "Main",
-      gmb_review_url: "https://g.page/r/ReviewLoopDemo",
       sort_index: 0,
       is_default: true,
       created_at: tIso,
       updated_at: tIso,
-      platform_links: { yelp: "https://www.yelp.com/biz/demo-coffee-main" },
+      platform_links: {
+        google: "https://g.page/r/GoodWordDemo",
+        yelp: "https://www.yelp.com/biz/demo-coffee-main",
+      },
     },
     {
       id: SEED_LOC_NORTH,
       business_id: TEST_BUSINESS_ID,
       name: "Northside",
-      gmb_review_url: "https://g.page/r/ReviewLoopDemo-North",
       sort_index: 1,
       is_default: false,
       created_at: tIso,
       updated_at: tIso,
-      platform_links: { yelp: "https://www.yelp.com/biz/demo-coffee-north" },
+      platform_links: {
+        google: "https://g.page/r/GoodWordDemo-North",
+        yelp: "https://www.yelp.com/biz/demo-coffee-north",
+      },
     },
   ];
 
@@ -102,47 +112,38 @@ export function createSeedState(): TestModeState {
     id: TEST_BUSINESS_ID,
     user_id: TEST_USER_ID,
     name: "Demo Coffee Co. (test mode)",
-    gmb_review_url: "https://g.page/r/ReviewLoopDemo",
-    country_code: "GB",
-    timezone: "Europe/London",
-    default_send_delay_minutes: 60,
-    quiet_hours_start: 21,
-    quiet_hours_end: 9,
+    country_code: "US",
+    timezone: "America/New_York",
     from_name: "Demo Coffee Co.",
     from_email: null,
     sms_sender_id: "DemoCoffee",
     branding_color: "#2563eb",
     is_sandbox: true,
     onboarding_completed_at: tIso,
-    default_location_id: SEED_LOC_MAIN,
     created_at: tIso,
     updated_at: tIso,
   };
 
-  const campE: Campaign = {
+  const templEmail: Template = {
     id: "a0000000-0000-4000-8000-00000ca111",
     business_id: business.id,
     name: "Email · Default",
     channel: "email",
-    template_subject: "Quick favour from {business}?",
-    template_body: "Thanks for choosing **{business}**! [Leave a review]({link})\n\n— {business}",
-    delay_minutes: 60,
+    subject: "Quick favour from {business}?",
+    body: "Thanks for choosing **{business}**! [Leave a review]({link})\n\n— {business}",
     is_default: true,
-    location_id: null,
     created_at: iso(t0),
     updated_at: iso(t0),
   };
 
-  const campS: Campaign = {
+  const templSms: Template = {
     id: "a0000000-0000-4000-8000-00000ca222",
     business_id: business.id,
     name: "SMS · Default",
     channel: "sms",
-    template_subject: null,
-    template_body: "Hi {name} — thanks! Review: {link}. Reply STOP to opt out.",
-    delay_minutes: 60,
+    subject: null,
+    body: "Hi {name} — {business} would love a quick review: {link}. Reply STOP to opt out.",
     is_default: true,
-    location_id: null,
     created_at: iso(t0),
     updated_at: iso(t0),
   };
@@ -219,29 +220,32 @@ export function createSeedState(): TestModeState {
     id: "a0000000-0000-4000-8000-00000m01",
     business_id: business.id,
     contact_id: contacts[0]!.id,
-    campaign_id: campE.id,
+    template_id: templEmail.id,
+    campaign_id: null,
+    campaign_step_index: null,
     channel: "email",
     send_at: iso(new Date(t0.getTime() - 2 * 864e5)),
     status: "sent",
     provider_id: "test-seed",
-    error: null,
+    error_detail: null,
     cost_credits: EMAIL_CREDIT,
     sent_at: iso(new Date(t0.getTime() - 2 * 864e5)),
     created_at: iso(t0),
     location_id: SEED_LOC_MAIN,
   };
 
-  // Due in the past: first dashboard load will "send" in sandbox (no real SMTP), same as the dispatcher.
   const m2: ScheduledMessage = {
     id: "a0000000-0000-4000-8000-00000m02",
     business_id: business.id,
     contact_id: contacts[1]!.id,
-    campaign_id: campE.id,
+    template_id: templEmail.id,
+    campaign_id: null,
+    campaign_step_index: null,
     channel: "email",
     send_at: iso(new Date(t0.getTime() - 2 * 60_000)),
     status: "scheduled",
     provider_id: null,
-    error: null,
+    error_detail: null,
     cost_credits: EMAIL_CREDIT,
     sent_at: null,
     created_at: iso(t0),
@@ -251,12 +255,14 @@ export function createSeedState(): TestModeState {
     id: "a0000000-0000-4000-8000-00000m03",
     business_id: business.id,
     contact_id: contacts[3]!.id,
-    campaign_id: campS.id,
+    template_id: templSms.id,
+    campaign_id: null,
+    campaign_step_index: null,
     channel: "sms",
     send_at: iso(new Date(t0.getTime() - 90_000)),
     status: "scheduled",
     provider_id: null,
-    error: null,
+    error_detail: null,
     cost_credits: SMS_CREDIT,
     sent_at: null,
     created_at: iso(t0),
@@ -266,12 +272,14 @@ export function createSeedState(): TestModeState {
     id: "a0000000-0000-4000-8000-00000m04",
     business_id: business.id,
     contact_id: contacts[2]!.id,
-    campaign_id: campE.id,
+    template_id: templEmail.id,
+    campaign_id: null,
+    campaign_step_index: null,
     channel: "email",
     send_at: iso(new Date(t0.getTime() + 2 * 3600e3)),
     status: "scheduled",
     provider_id: null,
-    error: null,
+    error_detail: null,
     cost_credits: EMAIL_CREDIT,
     sent_at: null,
     created_at: iso(t0),
@@ -386,13 +394,15 @@ export function createSeedState(): TestModeState {
   const st: TestModeState = {
     user: {
       id: TEST_USER_ID,
-      email: "test@reviewloop.local",
+      email: "test@goodword.local",
       name: "Test user (local mode)",
       picture_url: null,
     },
     business,
     locations,
-    campaigns: [campE, campS],
+    default_location_id: SEED_LOC_MAIN,
+    templates: [templEmail, templSms],
+    campaigns: [],
     contacts,
     messages: [m1, m2, m3sms, m4future],
     links: [link1, link2, link3sms, link4f],
@@ -435,6 +445,15 @@ export function getTestState(): TestModeState {
     if (!from.locations) {
       from.locations = [];
     }
+    if (!from.templates) {
+      from.templates = (from as unknown as { campaigns?: Template[] }).campaigns ?? [];
+    }
+    if (!from.campaigns) {
+      from.campaigns = [];
+    }
+    if (from.default_location_id === undefined) {
+      from.default_location_id = null;
+    }
     if (from.locations.length === 0) {
       const t = new Date().toISOString();
       from.locations = [
@@ -442,19 +461,18 @@ export function getTestState(): TestModeState {
           id: SEED_LOC_MAIN,
           business_id: from.business.id,
           name: "Main",
-          gmb_review_url: from.business.gmb_review_url,
           sort_index: 0,
           is_default: true,
           created_at: t,
           updated_at: t,
-          platform_links: { yelp: "https://www.yelp.com/biz/example" },
+          platform_links: { google: "", yelp: "https://www.yelp.com/biz/example" },
         },
       ];
       for (const m of from.messages) {
         if (!m.location_id) m.location_id = from.locations[0]!.id;
       }
-      if (!from.business.default_location_id) {
-        from.business = { ...from.business, default_location_id: from.locations[0]!.id };
+      if (!from.default_location_id) {
+        from.default_location_id = from.locations[0]!.id;
       }
       saveToStorage(from);
     }
@@ -509,7 +527,7 @@ export function processDueSends() {
       const cost = m.cost_credits;
       if (s.credits.balance < cost) {
         m.status = "failed";
-        m.error = "insufficient credits (test mode)";
+        m.error_detail = "insufficient credits (test mode)";
         m.sent_at = nowIso();
         continue;
       }
@@ -541,7 +559,7 @@ export function linkUrl(token: string) {
   return `${routingBaseUrl()}/r/${token}`;
 }
 
-/** Trims local outbound log in test mode: messages, routing links, and old events. Keeps localStorage small (no full bodies stored; links point at /r/{token}). */
+/** Trims local outbound log in test mode: messages, routing links, and old events. Keeps localStorage small. */
 export const OUTBOUND_LOG_RETENTION_DAYS = 30;
 
 export function applyOutboundLogRetentionInPlace(s: TestModeState, retentionDays: number) {
@@ -587,7 +605,7 @@ export function getDashboardForDays(days: number): DashboardStats {
     (locs || []).map((l) => [l.id, l.name] as [string, string])
   );
   const multi = locs.length > 1;
-  const def = s.business.default_location_id;
+  const def = s.default_location_id;
 
   const msgs = s.messages.filter((m) => m.created_at >= since);
   const byStatus: Record<string, number> = {};
@@ -601,8 +619,7 @@ export function getDashboardForDays(days: number): DashboardStats {
       credits: number;
       sends: number;
       view: number;
-      click_google: number;
-      click_outbound: number;
+      click_platform: number;
       submit_feedback: number;
     }
   > = {};
@@ -620,8 +637,7 @@ export function getDashboardForDays(days: number): DashboardStats {
         credits: 0,
         sends: 0,
         view: 0,
-        click_google: 0,
-        click_outbound: 0,
+        click_platform: 0,
         submit_feedback: 0,
       };
     }
@@ -646,36 +662,30 @@ export function getDashboardForDays(days: number): DashboardStats {
     return (def as string) || "unassigned";
   };
 
-  const funnel = { sent: byStatus.sent || 0, view: 0, click_google: 0, click_outbound: 0, submit_feedback: 0 };
-  const outbound_clicks: Record<string, number> = {};
+  const funnel = { sent: byStatus.sent || 0, view: 0, click_platform: 0, submit_feedback: 0 };
+  const clicks_by_platform: Record<string, number> = {};
   const rating_distribution: Record<string, number> = {};
   for (const e of evs) {
     const fe = e.event;
-    if (Object.prototype.hasOwnProperty.call(funnel, fe)) {
-      (funnel as Record<string, number>)[fe] += 1;
-    }
-    if (e.event === "click_outbound" && e.outbound_platform) {
-      const p = e.outbound_platform;
-      outbound_clicks[p] = (outbound_clicks[p] || 0) + 1;
-    }
-    if (e.event === "click_google" && (e as RoutingEventRow).outbound_platform) {
-      const p = (e as RoutingEventRow).outbound_platform as string;
-      outbound_clicks[p] = (outbound_clicks[p] || 0) + 1;
+    if (fe === "view") funnel.view += 1;
+    if (fe === "submit_feedback") funnel.submit_feedback += 1;
+    if (fe === "click_google" || fe === "click_outbound" || fe === "click_platform") {
+      funnel.click_platform += 1;
+      const p = e.outbound_platform || (fe === "click_google" ? "google" : "other");
+      clicks_by_platform[p] = (clicks_by_platform[p] || 0) + 1;
     }
     if (e.rating) {
       const k = String(e.rating);
       rating_distribution[k] = (rating_distribution[k] || 0) + 1;
     }
-    if (["view", "click_google", "click_outbound", "submit_feedback"].includes(e.event)) {
+    if (["view", "click_google", "click_outbound", "click_platform", "submit_feedback"].includes(fe)) {
       const k = eventStoreKey(e);
       if (!perLoc[k]) {
-        perLoc[k] = { messages_total: 0, credits: 0, sends: 0, view: 0, click_google: 0, click_outbound: 0, submit_feedback: 0 };
+        perLoc[k] = { messages_total: 0, credits: 0, sends: 0, view: 0, click_platform: 0, submit_feedback: 0 };
       }
-      const f = e.event;
-      if (f === "view") perLoc[k]!.view += 1;
-      if (f === "click_google") perLoc[k]!.click_google += 1;
-      if (f === "click_outbound") perLoc[k]!.click_outbound += 1;
-      if (f === "submit_feedback") perLoc[k]!.submit_feedback += 1;
+      if (fe === "view") perLoc[k]!.view += 1;
+      if (fe === "click_google" || fe === "click_outbound" || fe === "click_platform") perLoc[k]!.click_platform += 1;
+      if (fe === "submit_feedback") perLoc[k]!.submit_feedback += 1;
     }
   }
 
@@ -692,11 +702,10 @@ export function getDashboardForDays(days: number): DashboardStats {
       credits: 0,
       sends: 0,
       view: 0,
-      click_google: 0,
-      click_outbound: 0,
+      click_platform: 0,
       submit_feedback: 0,
     };
-    if (k === "unassigned" && multi && !d.messages_total && !d.sends && !d.view && !d.click_google && !d.click_outbound) {
+    if (k === "unassigned" && multi && !d.messages_total && !d.sends && !d.view && !d.click_platform) {
       continue;
     }
     const name = k === "unassigned" ? "Unassigned (no store on message)" : (locNames[k] ?? "Store");
@@ -707,8 +716,7 @@ export function getDashboardForDays(days: number): DashboardStats {
       sends: d.sends,
       credits_used: d.credits,
       view: d.view,
-      click_google: d.click_google,
-      click_outbound: d.click_outbound,
+      click_platform: d.click_platform,
       submit_feedback: d.submit_feedback,
     });
   }
@@ -722,7 +730,7 @@ export function getDashboardForDays(days: number): DashboardStats {
     credits_used,
     funnel,
     rating_distribution,
-    outbound_clicks_by_platform: Object.keys(outbound_clicks).length > 0 ? outbound_clicks : undefined,
+    clicks_by_platform: Object.keys(clicks_by_platform).length > 0 ? clicks_by_platform : undefined,
     multi_location: multi,
     store_performance: locs.length > 0 && store_performance.length > 0 ? store_performance : undefined,
   };

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 
 type Props = {
+  canEdit?: boolean;
+  onEdit?: () => void | Promise<void>;
   canOptOut: boolean;
   onOptOut: () => void | Promise<void>;
   canOptIn: boolean;
@@ -29,7 +31,15 @@ function placeMenu(
   return { top, left };
 }
 
-export default function ContactMoreMenu({ canOptOut, onOptOut, canOptIn, onOptIn, onRemove }: Props) {
+export default function ContactMoreMenu({
+  canEdit,
+  onEdit,
+  canOptOut,
+  onOptOut,
+  canOptIn,
+  onOptIn,
+  onRemove,
+}: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -40,16 +50,17 @@ export default function ContactMoreMenu({ canOptOut, onOptOut, canOptIn, onOptIn
     const b = btnRef.current?.getBoundingClientRect();
     const m = menuRef.current;
     if (!b) return;
-    const h = m?.offsetHeight ?? (canOptOut || canOptIn ? 100 : 52);
+    const items = (canEdit ? 1 : 0) + (canOptOut ? 1 : 0) + (canOptIn ? 1 : 0) + 1;
+    const h = m?.offsetHeight ?? items * 44 + 8;
     setPos(placeMenu(b, h));
-  }, [canOptOut, canOptIn]);
+  }, [canEdit, canOptOut, canOptIn]);
 
   useLayoutEffect(() => {
     if (!open) return;
     updatePosition();
     const id = requestAnimationFrame(() => updatePosition());
     return () => cancelAnimationFrame(id);
-  }, [open, canOptOut, canOptIn, updatePosition]);
+  }, [open, canEdit, canOptOut, canOptIn, updatePosition]);
 
   useEffect(() => {
     if (!open) return;
@@ -87,9 +98,22 @@ export default function ContactMoreMenu({ canOptOut, onOptOut, canOptIn, onOptIn
       <div
         ref={menuRef}
         role="menu"
-        className="fixed z-[300] w-48 rounded-xl border border-slate-200/90 bg-white py-1 shadow-lg ring-1 ring-slate-900/5"
+        className="fixed z-[300] w-48 rounded-xl border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-slate-900/5"
         style={{ top: pos.top, left: pos.left }}
       >
+        {canEdit && onEdit && (
+          <button
+            type="button"
+            role="menuitem"
+            className="block w-full px-3.5 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+            onClick={async () => {
+              setOpen(false);
+              await onEdit();
+            }}
+          >
+            Edit contact…
+          </button>
+        )}
         {canOptOut && (
           <button
             type="button"
@@ -135,7 +159,7 @@ export default function ContactMoreMenu({ canOptOut, onOptOut, canOptIn, onOptIn
       <button
         ref={btnRef}
         type="button"
-        className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200/80 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800"
+        className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800"
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label="More actions"

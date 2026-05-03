@@ -17,9 +17,9 @@ export default function SettingsPageSkeleton() {
       {[0, 1, 2].map((section) => (
         <section
           key={section}
-          className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white/90 shadow-[0_1px_0_rgba(15,23,42,0.04),0_12px_32px_-8px_rgba(15,23,42,0.08)]"
+          className="overflow-hidden rounded-2xl border border-slate-200 bg-white/90 shadow-[0_1px_0_rgba(15,23,42,0.04),0_12px_32px_-8px_rgba(15,23,42,0.08)]"
         >
-          <div className="border-b border-slate-100/90 bg-gradient-to-r from-slate-50/95 via-white to-slate-50/30">
+          <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50/95 via-white to-slate-50/30">
             <div className="flex gap-3.5 px-4 py-3.5 sm:px-6 sm:py-4">
               <ShimmerBlock className="h-10 w-10 rounded-xl shrink-0" />
               <div className="min-w-0 pt-0.5 flex-1">

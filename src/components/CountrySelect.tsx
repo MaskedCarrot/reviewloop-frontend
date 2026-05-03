@@ -55,7 +55,7 @@ export default function CountrySelect({
               <ReactCountryFlag countryCode={current.code} svg title={current.code} style={{ width: "1.35em", height: "1.35em" }} />
             </span>
             <span className="flex-1 min-w-0 truncate">
-              {current.name} <span className="text-slate-400">({current.code})</span>
+              {current.name} <span className="text-slate-500">({current.code})</span>
             </span>
             <span
               className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -75,7 +75,7 @@ export default function CountrySelect({
       {open && (
         <ul
           role="listbox"
-          className="absolute z-50 mt-1.5 max-h-60 w-full overflow-y-auto rounded-xl border border-slate-200/90 bg-white py-1.5 shadow-lg ring-1 ring-black/5"
+          className="absolute z-50 mt-1.5 max-h-60 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white py-1.5 shadow-lg ring-1 ring-black/5"
         >
           {options.map((c) => (
             <li key={c.code} role="option" aria-selected={c.code === value}>
@@ -94,7 +94,7 @@ export default function CountrySelect({
                   <ReactCountryFlag countryCode={c.code} svg title={c.code} style={{ width: "1.35em", height: "1.35em" }} />
                 </span>
                 <span className="min-w-0 flex-1 truncate text-left">
-                  {c.name} <span className="text-slate-400">({c.code})</span>
+                  {c.name} <span className="text-slate-500">({c.code})</span>
                 </span>
               </button>
             </li>

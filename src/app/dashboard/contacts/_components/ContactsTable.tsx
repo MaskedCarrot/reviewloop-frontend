@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { deleteContact, resubscribeContact, sendContactReviewRequest, unsubscribeContact } from "@/lib/api";
-import type { Contact } from "@/types";
+import { deleteContact, resubscribeContact, unsubscribeContact } from "@/lib/api";
+import type { BusinessLocation, Contact, Template } from "@/types";
 import ContactMoreMenu from "@/components/ContactMoreMenu";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import InfoTip from "@/components/InfoTip";
 import PageLoader from "@/components/PageLoader";
 import { useAppToast } from "@/components/ToastProvider";
-import ChannelQueuedIcon from "./ChannelQueuedIcon";
+import EditContactDialog from "./EditContactDialog";
+import SendContactDialog from "./SendContactDialog";
 import { contactInitial, shortDate, SOURCE_PILL, SOURCE_LABEL } from "./contactFormat";
 
 const PAGE_SIZES = [10, 25, 50, 100] as const;
@@ -25,6 +27,9 @@ export default function ContactsTable({
   onChanged,
   timeZoneIana = "UTC",
   sms,
+  templates,
+  locations,
+  defaultLocationId,
   rowSelection,
 }: {
   contacts: Contact[];
@@ -40,6 +45,9 @@ export default function ContactsTable({
   /** IANA zone from business settings — ingest times render in this zone, not the browser's. */
   timeZoneIana?: string;
   sms: boolean;
+  templates: Template[];
+  locations: BusinessLocation[];
+  defaultLocationId: string | null;
   /** When set, each row has a checkbox for "add to campaign" bulk flow. */
   rowSelection?: {
     selected: Set<string>;
@@ -47,10 +55,12 @@ export default function ContactsTable({
     onToggleAllOnPage: () => void;
   };
 }) {
-  const [sending, setSending] = useState<string | null>(null);
-  const [channelQueued, setChannelQueued] = useState<Set<string>>(() => new Set());
   const toast = useAppToast();
   const [consentDialog, setConsentDialog] = useState<{ name: string } | null>(null);
+  const [sendTarget, setSendTarget] = useState<Contact | null>(null);
+  const [editTarget, setEditTarget] = useState<Contact | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const pageIds = rowSelection ? contacts.map((c) => c.id) : [];
   const allOnPageSelected = rowSelection
     ? pageIds.length > 0 && pageIds.every((id) => rowSelection.selected.has(id))
@@ -64,20 +74,6 @@ export default function ContactsTable({
     if (!el || !rowSelection) return;
     el.indeterminate = someOnPageSelected;
   }, [rowSelection, someOnPageSelected, allOnPageSelected, contacts.length]);
-
-  useEffect(() => {
-    const ids = new Set(contacts.map((c) => c.id));
-    setChannelQueued((prev) => {
-      const next = new Set<string>();
-      Array.from(prev).forEach((k) => {
-        const p = k.indexOf("|");
-        if (p < 0) return;
-        if (ids.has(k.slice(p + 1))) next.add(k);
-      });
-      if (next.size === prev.size && Array.from(next).every((k) => prev.has(k))) return prev;
-      return next;
-    });
-  }, [contacts]);
 
   if (loading) {
     return (
@@ -154,7 +150,7 @@ export default function ContactsTable({
                 >
                   Previous
                 </button>
-                <span className="tabular-nums text-[11px] text-slate-500 px-1" aria-current="page">
+                <span className="tabular-nums text-[11px] text-slate-600 px-1" aria-current="page">
                   {listPage} / {totalPages}
                 </span>
                 <button
@@ -171,7 +167,7 @@ export default function ContactsTable({
         )}
 
         {rowSelection && contacts.length > 0 && (
-          <div className="px-3 py-2 sm:px-4 flex items-center gap-2 border-b border-slate-100/90 bg-slate-50/60">
+          <div className="px-3 py-2 sm:px-4 flex items-center gap-2 border-b border-slate-200 bg-slate-50">
             <input
               ref={pageSelectHeaderRef}
               type="checkbox"
@@ -180,25 +176,20 @@ export default function ContactsTable({
               onChange={rowSelection.onToggleAllOnPage}
               title="Select or clear all on this page"
             />
-            <span className="text-[11px] text-slate-500">Page selection (for multi-step campaign)</span>
+            <span className="text-[11px] text-slate-600">Page selection (for multi-step campaign)</span>
           </div>
         )}
         <ul className="divide-y divide-slate-100" role="list">
           {contacts.map((c) => {
             const canEmail = Boolean(c.email) && !c.unsubscribed_at;
             const canSms = Boolean(c.phone_e164) && sms && !c.unsubscribed_at;
+            const canSend = !c.unsubscribed_at && (canEmail || canSms);
             const isOptedOut = Boolean(c.unsubscribed_at);
             const sourcePill = SOURCE_PILL[c.source] ?? "bg-slate-100 text-slate-700";
             const sourceLabel = SOURCE_LABEL[c.source] ?? c.source;
-            const emailAckKey = `e|${c.id}`;
-            const smsAckKey = `s|${c.id}`;
-            const emailBusy = sending === `${c.id}-e`;
-            const smsBusy = sending === `${c.id}-s`;
-            const emailShowQueued = !isOptedOut && canEmail && channelQueued.has(emailAckKey) && !emailBusy;
-            const smsShowQueued = !isOptedOut && canSms && channelQueued.has(smsAckKey) && !smsBusy;
             return (
               <li key={c.id} role="listitem">
-                <article className="px-3 py-2.5 sm:px-4 sm:py-3 transition-colors hover:bg-slate-50/60">
+                <article className="px-3 py-2.5 sm:px-4 sm:py-3 transition-colors hover:bg-slate-50">
                   <div className="flex flex-col gap-2.5 min-[520px]:flex-row min-[520px]:items-center min-[520px]:gap-3">
                     {rowSelection && (
                       <input
@@ -231,25 +222,25 @@ export default function ContactsTable({
                             {sourceLabel}
                           </span>
                         </div>
-                        <p className="mt-0.5 text-[11px] break-words text-slate-500">
+                        <p className="mt-0.5 text-[11px] break-words text-slate-600">
                           {[c.email, c.phone_e164].filter(Boolean).join(" · ") || "—"}
                         </p>
                         {c.external_ref && (
                           <p className="mt-0.5 text-[11px] break-all text-slate-600" title="External ref">
-                            <span className="text-slate-400">Ref</span> {c.external_ref}
+                            <span className="text-slate-500">Ref</span> {c.external_ref}
                           </p>
                         )}
-                        <p className="mt-0.5 text-[10px] text-slate-400">
+                        <p className="mt-0.5 text-[10px] text-slate-500">
                           Ingested {c.created_at ? shortDate(c.created_at, timeZoneIana) : "—"}
                         </p>
                         {isOptedOut && (
                           <span className="mt-1 inline-flex w-fit text-[10px] font-medium text-slate-500">Opted out</span>
                         )}
                         <p
-                          className="mt-0.5 text-[10px] text-slate-400 min-[520px]:hidden"
+                          className="mt-0.5 text-[10px] text-slate-500 min-[520px]:hidden"
                           title={c.last_message_at ? `Last message ${shortDate(c.last_message_at)}` : undefined}
                         >
-                          <span className="text-slate-500">Last send:</span> {c.last_message_at ? shortDate(c.last_message_at) : "—"}
+                          <span className="text-slate-600">Last send:</span> {c.last_message_at ? shortDate(c.last_message_at) : "—"}
                         </p>
                       </div>
                     </div>
@@ -258,119 +249,29 @@ export default function ContactsTable({
                       className="hidden shrink-0 text-[11px] tabular-nums text-slate-500 min-[520px]:block min-[520px]:w-36 min-[520px]:text-right"
                       title="Last time a review request was sent (or scheduled)"
                     >
-                      <span className="block text-[9px] uppercase tracking-wide text-slate-400">Last send</span>
+                      <span className="block text-[9px] uppercase tracking-wide text-slate-500">Last send</span>
                       {c.last_message_at ? shortDate(c.last_message_at) : "—"}
                     </p>
 
-                    <div className="flex flex-col items-stretch gap-1.5 border-t border-slate-100/80 pt-2 min-[520px]:flex-row min-[520px]:items-center min-[520px]:border-t-0 min-[520px]:pt-0 min-[520px]:shrink-0 min-[520px]:justify-end sm:min-w-0">
-                      <div
-                        className={[
-                          "w-full min-w-0 gap-2",
-                          canEmail && canSms
-                            ? "grid grid-cols-2 sm:grid-cols-2 min-[520px]:w-auto min-[520px]:max-w-[22rem]"
-                            : "flex min-[520px]:min-w-[7.5rem] flex-1",
-                          canEmail && canSms ? "" : "min-[420px]:max-w-xs",
-                        ]
-                          .filter(Boolean)
-                          .join(" ")}
-                      >
-                        {!isOptedOut && canEmail && (
-                          <button
-                            type="button"
-                            disabled={emailBusy}
-                            onClick={async () => {
-                              setChannelQueued((prev) => {
-                                const n = new Set(prev);
-                                n.delete(emailAckKey);
-                                return n;
-                              });
-                              setSending(`${c.id}-e`);
-                              try {
-                                await sendContactReviewRequest(c.id, { channel: "email" });
-                                setChannelQueued((prev) => new Set(prev).add(emailAckKey));
-                                onChanged();
-                              } catch (e) {
-                                toast.error(e instanceof Error ? e.message : "Could not send");
-                              } finally {
-                                setSending(null);
-                              }
-                            }}
-                            className={
-                              emailShowQueued
-                                ? `inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-md border border-emerald-200/90 bg-emerald-50/95 px-2 text-xs font-semibold text-emerald-900 shadow-sm transition ${
-                                    canEmail && canSms ? "w-full" : "flex-1"
-                                  }`
-                                : `inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-md border border-slate-200/80 bg-white px-2 text-xs font-medium text-slate-800 transition hover:border-sky-300/70 hover:bg-sky-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/30 disabled:opacity-50 ${
-                                    canEmail && canSms ? "w-full" : "flex-1"
-                                  }`
-                            }
-                            aria-label={emailShowQueued ? "Email review request queued" : "Send email review request"}
-                          >
-                            {emailBusy ? (
-                              "Sending…"
-                            ) : emailShowQueued ? (
-                              <>
-                                <ChannelQueuedIcon />
-                                Queued
-                              </>
-                            ) : (
-                              <>
-                                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500" aria-hidden />
-                                Email
-                              </>
-                            )}
-                          </button>
-                        )}
-                        {!isOptedOut && canSms && (
-                          <button
-                            type="button"
-                            disabled={smsBusy}
-                            onClick={async () => {
-                              setChannelQueued((prev) => {
-                                const n = new Set(prev);
-                                n.delete(smsAckKey);
-                                return n;
-                              });
-                              setSending(`${c.id}-s`);
-                              try {
-                                await sendContactReviewRequest(c.id, { channel: "sms" });
-                                setChannelQueued((prev) => new Set(prev).add(smsAckKey));
-                                onChanged();
-                              } catch (e) {
-                                toast.error(e instanceof Error ? e.message : "Could not send");
-                              } finally {
-                                setSending(null);
-                              }
-                            }}
-                            className={
-                              smsShowQueued
-                                ? `inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-md border border-emerald-200/90 bg-emerald-50/95 px-2 text-xs font-semibold text-emerald-900 shadow-sm transition ${
-                                    canEmail && canSms ? "w-full" : "flex-1"
-                                  }`
-                                : `inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-md border border-slate-200/80 bg-white px-2 text-xs font-medium text-slate-800 transition hover:border-violet-300/70 hover:bg-violet-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/30 disabled:opacity-50 ${
-                                    canEmail && canSms ? "w-full" : "flex-1"
-                                  }`
-                            }
-                            aria-label={smsShowQueued ? "SMS review request queued" : "Send SMS review request"}
-                          >
-                            {smsBusy ? (
-                              "Sending…"
-                            ) : smsShowQueued ? (
-                              <>
-                                <ChannelQueuedIcon />
-                                Queued
-                              </>
-                            ) : (
-                              <>
-                                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500" aria-hidden />
-                                SMS
-                              </>
-                            )}
-                          </button>
-                        )}
-                      </div>
+                    <div className="flex flex-col items-stretch gap-1.5 border-t border-slate-200 pt-2 min-[520px]:flex-row min-[520px]:items-center min-[520px]:border-t-0 min-[520px]:pt-0 min-[520px]:shrink-0 min-[520px]:justify-end sm:min-w-0">
+                      {canSend && (
+                        <button
+                          type="button"
+                          onClick={() => setSendTarget(c)}
+                          className="inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-md border border-warm-200 bg-warm-50 px-3 text-xs font-semibold text-warm-900 transition hover:border-warm-300 hover:bg-warm-100"
+                          aria-label="Send a review request"
+                        >
+                          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                            <path d="M22 2 11 13" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M22 2 15 22l-4-9-9-4 20-7Z" strokeLinejoin="round" />
+                          </svg>
+                          Send
+                        </button>
+                      )}
 
                       <ContactMoreMenu
+                        canEdit
+                        onEdit={() => setEditTarget(c)}
                         canOptOut={!isOptedOut}
                         onOptOut={async () => {
                           try {
@@ -390,11 +291,7 @@ export default function ContactsTable({
                             toast.error(e instanceof Error ? e.message : "Could not resubscribe");
                           }
                         }}
-                        onRemove={async () => {
-                          if (!confirm("Delete this contact permanently?")) return;
-                          await deleteContact(c.id);
-                          onChanged();
-                        }}
+                        onRemove={() => setDeleteTarget(c)}
                       />
                     </div>
                   </div>
@@ -404,6 +301,59 @@ export default function ContactsTable({
           })}
         </ul>
       </div>
+      <SendContactDialog
+        open={sendTarget !== null}
+        contact={sendTarget}
+        templates={templates}
+        sms={sms}
+        onClose={() => setSendTarget(null)}
+        // No full list reload after send — the toast confirms it's queued. The Sends
+        // tab is the source of truth for outgoing messages, and reloading the whole
+        // list here just causes a visible spinner flash with no real benefit.
+        onSent={() => undefined}
+      />
+
+      <EditContactDialog
+        open={editTarget !== null}
+        contact={editTarget}
+        locations={locations}
+        defaultLocationId={defaultLocationId}
+        onClose={() => setEditTarget(null)}
+        onSaved={onChanged}
+      />
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Remove this contact?"
+        body={
+          <p>
+            This permanently deletes{" "}
+            <strong className="text-slate-900">
+              {deleteTarget?.name || deleteTarget?.email || deleteTarget?.phone_e164 || "this contact"}
+            </strong>{" "}
+            and any scheduled messages for them. This cannot be undone.
+          </p>
+        }
+        confirmLabel="Remove contact"
+        tone="danger"
+        busy={deleting}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setDeleting(true);
+          try {
+            await deleteContact(deleteTarget.id);
+            toast.success("Contact removed");
+            onChanged();
+            setDeleteTarget(null);
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "Could not remove contact");
+          } finally {
+            setDeleting(false);
+          }
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
+
       {consentDialog && (
         <div
           className="fixed inset-0 z-[500] flex items-end sm:items-center justify-center p-3 bg-black/40"

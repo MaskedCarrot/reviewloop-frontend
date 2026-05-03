@@ -161,7 +161,7 @@ export default function PrintableQrPoster({ dataUrl, businessName, pageKey, them
           {businessName || "Your business"}
         </h1>
         <p className={`mt-2 text-sm sm:text-base font-medium ${t.subClass} max-w-md mx-auto`}>
-          Scan the code to leave a quick Google review
+          Scan the code to leave a quick review
         </p>
       </div>
 
@@ -181,12 +181,14 @@ export default function PrintableQrPoster({ dataUrl, businessName, pageKey, them
           <div className="h-px w-8 bg-white/50" />
         </div>
         <div className="flex items-center gap-2 text-white">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm ring-1 ring-white/30 text-xs font-black">
-            RL
+          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm ring-1 ring-white/30">
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden>
+              <path d="M12 2l2.39 6.95H22l-6.18 4.49L18.21 21 12 16.27 5.79 21l2.39-7.56L2 8.95h7.61L12 2z" />
+            </svg>
           </div>
           <div className="text-left leading-tight">
-            <div className="text-sm sm:text-base font-bold tracking-tight">ReviewLoop</div>
-            <div className="text-[10px] text-white/75">google reviews, made simple</div>
+            <div className="text-sm sm:text-base font-bold tracking-tight">GoodWord</div>
+            <div className="text-[10px] text-white/75">reviews made simple</div>
           </div>
         </div>
       </div>

@@ -19,14 +19,16 @@ import { ButtonSpinner, useAppToast } from "@/components/ToastProvider";
 import { useBrowserLocalMockApp } from "@/lib/useBrowserLocalMockApp";
 import SectionLabel from "@/components/SectionLabel";
 import DashboardPageHeader from "@/components/DashboardPageHeader";
-import InfoTip from "@/components/InfoTip";
+import Disclosure from "@/components/Disclosure";
 import BillingPageSkeleton from "@/components/skeletons/BillingPageSkeleton";
 import type { CreditState, MembershipOffer, MyCreditRates, PublicSendRateCountry } from "@/types";
+import { isSmsEnabledForBusiness } from "@/lib/countryUi";
 
 const PACKS = [
-  { key: "topup_500", label: "500", price: "$5" },
-  { key: "topup_2000", label: "2,000", price: "$15" },
-  { key: "topup_5000", label: "5,000", price: "$30" },
+  { key: "topup_100", label: "100", price: "$10", credits: 100 },
+  { key: "topup_200", label: "200", price: "$18", credits: 200 },
+  { key: "topup_500", label: "500", price: "$40", credits: 500 },
+  { key: "topup_2000", label: "2,000", price: "$140", credits: 2_000 },
 ];
 
 const section = "app-section";
@@ -163,21 +165,18 @@ export default function BillingPage() {
       <div className="space-y-2">
         <DashboardPageHeader
           title="Credits"
-          description="Balance, Pro, top-ups, and per-country send costs in one place."
-          info={{
-            label: "How credits work",
-            size: "md",
-            children: (
-              <p>
-                Monthly <strong>Pro</strong> or one-time <strong>top-ups</strong>. Sending pauses at zero balance.{" "}
-                <strong>Email</strong> and <strong>SMS</strong> debit by the rates for your market (and all markets in
-                the list below the fold).
-              </p>
-            ),
-          }}
+          description="Top up to keep sending. Sending pauses at zero balance."
+          end={
+            <a
+              href="#topup"
+              className="btn-warm shrink-0 w-full sm:w-fit min-h-10 px-5"
+            >
+              Add credits
+            </a>
+          }
         />
         {isLocalMock && (
-          <p className="text-xs text-slate-600 border border-slate-200/80 rounded-2xl px-3 py-2 bg-slate-50/80">
+          <p className="text-xs font-medium text-slate-700 border border-slate-200 rounded-xl px-3 py-2 bg-slate-50">
             Preview: checkout and credits are local only; no real charges.
           </p>
         )}
@@ -185,7 +184,7 @@ export default function BillingPage() {
 
       {error && (
         <div
-          className="rounded-lg border border-red-200/60 bg-red-50/50 px-3 py-2 text-sm text-red-800"
+          className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"
           role="alert"
         >
           {error}
@@ -196,204 +195,281 @@ export default function BillingPage() {
         <BillingPageSkeleton />
       ) : (
         <>
-      {/* Balance */}
-      <section className={section} aria-labelledby="balance-heading">
-        <p id="balance-heading" className="sr-only">
-          Current credit balance
-        </p>
-        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+      {/* Balance — splashy warm-tinted hero */}
+      <section
+        className="relative overflow-hidden rounded-3xl border border-warm-200/80 bg-gradient-to-br from-warm-50 via-white to-white p-6 sm:p-8 shadow-card"
+        aria-labelledby="balance-heading"
+      >
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -top-20 -right-12 h-56 w-56 rounded-full bg-gradient-to-br from-warm-200/55 via-warm-100/30 to-transparent blur-2xl"
+        />
+        <p id="balance-heading" className="sr-only">Current credit balance</p>
+        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-400">Available</span>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className="text-5xl font-light tabular-nums text-slate-900 tracking-tight sm:text-6xl">
-                {credits?.balance ?? 0}
+            <p className="app-eyebrow">
+              <span className="h-1.5 w-1.5 rounded-full bg-warm-500" />
+              Available balance
+            </p>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="display-title-xl text-slate-900 tabular-nums leading-none">
+                {credits?.balance.toLocaleString() ?? 0}
               </span>
-              <span className="text-sm text-slate-500 pb-1.5">credits</span>
+              <span className="text-base font-medium text-slate-600 pb-1.5">credits</span>
             </div>
             {credits != null && (
-              <p className="text-xs text-slate-500 mt-2">
-                Low-balance email at {credits.low_balance_threshold} credits
+              <p className="text-sm text-slate-600 mt-3">
+                Low-balance email at{" "}
+                <span className="font-semibold text-slate-800 tabular-nums">
+                  {credits.low_balance_threshold}
+                </span>{" "}
+                credits
               </p>
             )}
           </div>
           {myRates && (
-            <div className="sm:max-w-xs sm:text-right border-t border-slate-100/90 pt-3 sm:border-0 sm:pt-0">
-              <p className="text-[11px] text-slate-400 uppercase tracking-widest">Your market</p>
-              <p className="text-sm text-slate-600 mt-1">
+            <div className="sm:max-w-xs sm:text-right border-t border-slate-200/70 pt-4 sm:border-0 sm:pt-0">
+              <p className="app-eyebrow-quiet">Your market</p>
+              <p className="text-sm text-slate-800 mt-1.5">
                 {myRates.country_code && (
-                  <span className="text-slate-500 mr-1">{myRates.country_code}</span>
+                  <span className="font-semibold text-slate-900 mr-1.5">{myRates.country_code}</span>
                 )}
-                {myRates.email_credits} <span className="text-slate-400">email</span>
-                <span className="text-slate-300 mx-1">·</span>
-                {myRates.sms_credits_per_segment}{" "}
-                <span className="text-slate-400">SMS / seg.</span>
+                <span className="font-semibold text-slate-900 tabular-nums">{myRates.email_credits}</span>
+                <span className="text-slate-600"> per email</span>
+                {isSmsEnabledForBusiness(bootstrap?.business) && (
+                  <>
+                    <span className="text-slate-400 mx-2">·</span>
+                    <span className="font-semibold text-slate-900 tabular-nums">{myRates.sms_credits_per_segment}</span>
+                    <span className="text-slate-600"> per SMS seg.</span>
+                  </>
+                )}
               </p>
-              {myRates.notes ? <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">{myRates.notes}</p> : null}
+              {myRates.notes ? (
+                <p className="text-xs text-slate-600 mt-2 leading-relaxed">{myRates.notes}</p>
+              ) : null}
             </div>
           )}
         </div>
       </section>
 
-      {/* Pro */}
-      {membership && membership.tiers.length > 0 && (
-        <section className={section} aria-labelledby="pro-heading">
-          <div className="flex items-start justify-between gap-2 mb-3">
-            <div>
-              <div id="pro-heading" className="flex items-center gap-1.5">
-                <SectionLabel>Pro</SectionLabel>
-                <InfoTip size="sm" label="Pro plans">
-                  <p>
-                    Same Pro features. Monthly credits and price follow your business country. Extra notes (tax, etc.) may
-                    show under a tier.
-                  </p>
-                </InfoTip>
-              </div>
+      {/* Top up — primary action */}
+      <section className={section} id="topup" aria-labelledby="topup-heading">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+          <SectionLabel id="topup-heading">One-time top up</SectionLabel>
+          <p className="text-xs text-slate-500">credits never expire</p>
+        </div>
+        {/* Free-plan purchase cap notice. Pro = limits.credits_purchase_per_month is null. */}
+        {(() => {
+          const u = bootstrap?.usage;
+          const cap = u?.limits.credits_purchase_per_month;
+          if (!u || cap == null) {
+            return (
+              <p className="text-sm text-slate-600 mb-4">Pick a pack to add credits to your balance.</p>
+            );
+          }
+          const bought = u.used.credits_purchased_this_month ?? 0;
+          const remaining = Math.max(0, cap - bought);
+          const atCap = remaining <= 0;
+          return (
+            <div className="mb-4 rounded-xl border border-warm-200 bg-warm-50 px-3.5 py-3 text-sm text-slate-700">
+              <p>
+                You&apos;re on Free — purchases are capped at{" "}
+                <span className="font-semibold text-slate-900 tabular-nums">
+                  {cap.toLocaleString()}
+                </span>{" "}
+                credits per UTC month.{" "}
+                {atCap ? (
+                  <>
+                    Cap reached this month. Resets on the 1st, or{" "}
+                    <a className="link" href="/pricing">upgrade to Pro</a> for unlimited
+                    purchases.
+                  </>
+                ) : (
+                  <>
+                    You can still buy{" "}
+                    <span className="font-semibold text-slate-900 tabular-nums">
+                      {remaining.toLocaleString()}
+                    </span>{" "}
+                    more this month.
+                  </>
+                )}
+              </p>
             </div>
-          </div>
+          );
+        })()}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {PACKS.map((p, i) => {
+            const isMid = i === 2;
+            const cap = bootstrap?.usage?.limits.credits_purchase_per_month ?? null;
+            const bought = bootstrap?.usage?.used.credits_purchased_this_month ?? 0;
+            const remaining = cap == null ? Number.POSITIVE_INFINITY : Math.max(0, cap - bought);
+            const exceedsCap = p.credits > remaining;
+            const disabled = busy || exceedsCap;
+            return (
+              <button
+                key={p.key}
+                type="button"
+                disabled={disabled}
+                onClick={() => void topUp(p.key)}
+                title={exceedsCap ? `Exceeds your Free monthly purchase cap. Upgrade to Pro for unlimited.` : undefined}
+                className={[
+                  "relative flex flex-col items-stretch rounded-2xl border-2 px-3 py-5 text-center transition-all",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warm-400/30",
+                  exceedsCap
+                    ? "cursor-not-allowed opacity-50 border-slate-200 bg-slate-50"
+                    : isMid
+                      ? "border-warm-300 bg-gradient-to-br from-warm-50 to-white hover:border-warm-400 hover:shadow-card disabled:opacity-50"
+                      : "border-slate-200 bg-white hover:border-warm-300 hover:bg-warm-50/40 hover:shadow-card disabled:opacity-50",
+                ].join(" ")}
+              >
+                {isMid && !exceedsCap ? (
+                  <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 rounded-full bg-warm-500 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white shadow-sm">
+                    Most popular
+                  </span>
+                ) : null}
+                <span className="text-2xl font-semibold tabular-nums text-slate-900">{p.label}</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mt-0.5">credits</span>
+                <span className="text-base font-semibold text-warm-700 mt-2">{p.price}</span>
+                {exceedsCap ? (
+                  <span className="mt-1.5 text-[10px] font-medium text-slate-500">
+                    over Free cap
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Pro subscription */}
+      {membership && membership.tiers.length > 0 && (
+        <Disclosure
+          label="Subscribe to Pro for monthly credits"
+          hint={`${membership.tiers.length} ${membership.tiers.length === 1 ? "tier" : "tiers"} · monthly billing`}
+        >
           {membership.notes && (
-            <p className="text-xs text-slate-500 mb-4 leading-relaxed">{membership.notes}</p>
+            <p className="text-xs text-slate-600 mb-3 leading-relaxed">{membership.notes}</p>
           )}
-          <ul className="space-y-2">
+          <ul className="space-y-1">
             {membership.tiers.map((t) => (
               <li
                 key={t.key}
-                className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-3 border-b border-slate-100/80 last:border-0 first:pt-0"
+                className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-3 border-b border-slate-200 last:border-0"
               >
                 <div>
-                  <p className="text-sm font-medium text-slate-800">{t.display_name}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {t.monthly_credits} credits / month · {t.display_price || "—"}
-                    {!t.polar_configured && <span className="text-amber-700/90"> · setup pending</span>}
+                  <p className="text-base font-semibold text-slate-900">{t.display_name}</p>
+                  <p className="text-sm text-slate-700 mt-0.5">
+                    <span className="font-semibold tabular-nums">{t.monthly_credits.toLocaleString()}</span> credits / month
+                    <span className="text-slate-400 mx-1.5">·</span>
+                    <span className="font-semibold">{t.display_price || "—"}</span>
+                    {!t.polar_configured && <span className="text-amber-800 ml-1.5">· setup pending</span>}
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => void startSub(t.key)}
                   disabled={busy || !t.polar_configured}
-                  className="shrink-0 btn-primary h-9 px-4 text-sm min-w-[7.5rem] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="shrink-0 btn-secondary h-10 px-5 text-sm min-w-[7.5rem]"
                 >
                   {busy ? "…" : "Subscribe"}
                 </button>
               </li>
             ))}
           </ul>
-        </section>
-      )}
-      {membership && membership.tiers.length === 0 && (
-        <p className="text-sm text-amber-900/80">No Pro tiers are configured for this host yet.</p>
+        </Disclosure>
       )}
 
-      {/* Top up */}
-      <section className={section} aria-labelledby="topup-heading">
-        <SectionLabel id="topup-heading">Top up</SectionLabel>
-        <p className="text-sm text-slate-500 mt-1 mb-4">One-time credits, same balance.</p>
-        <div className="grid grid-cols-3 gap-2">
-          {PACKS.map((p) => (
+      <Disclosure
+        label="Low-balance email alert"
+        hint={credits ? `Email me at ${credits.low_balance_threshold} credits` : undefined}
+      >
+        <form onSubmit={saveThreshold} className="space-y-3">
+          <p className="text-sm text-slate-600">
+            We&apos;ll email you the first time you cross this level — at most once every few days.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              className="input h-10 w-28"
+              type="number"
+              min={0}
+              name="low_balance_threshold"
+              value={thresholdEdit}
+              onChange={(e) => setThresholdEdit(e.target.value === "" ? "" : Number(e.target.value))}
+              aria-label="Low balance credit threshold"
+            />
             <button
-              key={p.key}
-              type="button"
-              disabled={busy}
-              onClick={() => void topUp(p.key)}
-              className="flex flex-col items-stretch rounded-xl border border-slate-200/50 bg-slate-50/30 px-2 py-3 text-center transition hover:border-brand-300/50 hover:bg-brand-50/25 hover:shadow-sm disabled:opacity-50"
+              type="submit"
+              disabled={thresholdBusy}
+              className="btn-secondary h-10 px-4 text-sm"
             >
-              <span className="text-lg font-medium tabular-nums text-slate-900">{p.label}</span>
-              <span className="text-[10px] text-slate-400 mt-0.5">credits</span>
-              <span className="text-sm text-slate-500 mt-2">{p.price}</span>
+              {thresholdBusy ? (
+                <>
+                  <ButtonSpinner variant="onSecondary" />
+                  Saving…
+                </>
+              ) : (
+                "Save"
+              )}
             </button>
-          ))}
-        </div>
-      </section>
-
-      <form onSubmit={saveThreshold} className={section}>
-        <div className="flex items-center gap-1.5 mb-2">
-          <SectionLabel>Low balance</SectionLabel>
-          <InfoTip size="sm" label="Low-balance email">
-            <p>
-              One email the first time you hit this level; further notices only if still low, after 3+ days, so you are
-              not spammed.
-            </p>
-          </InfoTip>
-        </div>
-        <p className="text-sm text-slate-500 mb-3">Get emailed when you cross this number.</p>
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            className="h-9 w-28 rounded-lg border-0 bg-slate-100/80 px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-200"
-            type="number"
-            min={0}
-            name="low_balance_threshold"
-            value={thresholdEdit}
-            onChange={(e) => setThresholdEdit(e.target.value === "" ? "" : Number(e.target.value))}
-            aria-label="Low balance credit threshold"
-          />
-          <button
-            type="submit"
-            disabled={thresholdBusy}
-            className="btn-secondary h-9 px-3 text-sm inline-flex items-center justify-center gap-2"
-          >
-            {thresholdBusy ? (
-              <>
-                <ButtonSpinner variant="onSecondary" />
-                Saving…
-              </>
-            ) : (
-              "Save"
-            )}
-          </button>
-        </div>
-      </form>
-        </>
-      )}
-
-      {/* All markets — merged send rates */}
-      <section className={section} id="rates" aria-labelledby="rates-heading">
-        <div className="flex items-start justify-between gap-2 mb-4">
-          <div>
-            <div className="flex items-center gap-1.5">
-              <SectionLabel id="rates-heading">All markets</SectionLabel>
-              <InfoTip size="md" label="Per-country send costs">
-                <p>
-                  Credits for one <strong>email</strong> and for one <strong>SMS segment</strong> in each market. Your
-                  Settings country is marked in the list.
-                </p>
-              </InfoTip>
-            </div>
-            <p className="text-xs text-slate-500 mt-0.5">How many credits a send uses, by country.</p>
           </div>
-        </div>
+        </form>
+      </Disclosure>
+
+      {!creditsDataLoading && credits && credits.ledger.length > 0 ? (
+        <Disclosure
+          label="Recent activity"
+          hint={`${credits.ledger.length} ${credits.ledger.length === 1 ? "entry" : "entries"}`}
+        >
+          <ul className="text-sm divide-y divide-slate-200">
+            {credits.ledger.map((row, i) => (
+              <li key={i} className="flex items-center justify-between gap-3 py-3 first:pt-0">
+                <div>
+                  <div className="font-medium text-slate-800 capitalize">{row.reason.replace(/_/g, " ")}</div>
+                  <div className="text-xs text-slate-500 tabular-nums mt-0.5">
+                    {shortDate(row.created_at, ledgerTimeZone)}
+                  </div>
+                </div>
+                {/*
+                  Don't rely on color alone (red/green) — adds a leading "+" or
+                  "−" sign and an aria-label so screen-readers and people with
+                  color-vision differences can still tell credits from debits.
+                */}
+                <div
+                  className={[
+                    "flex items-center gap-1 text-sm font-semibold tabular-nums shrink-0",
+                    row.delta < 0 ? "text-red-700" : "text-emerald-700",
+                  ].join(" ")}
+                  aria-label={
+                    row.delta < 0
+                      ? `Debit of ${Math.abs(row.delta)} credits`
+                      : `Credit of ${row.delta} credits`
+                  }
+                >
+                  <span aria-hidden className="text-base leading-none">
+                    {row.delta < 0 ? "−" : "+"}
+                  </span>
+                  <span>{Math.abs(row.delta)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Disclosure>
+      ) : null}
+
+      <Disclosure
+        label="Send rates by country"
+        hint="How many credits one email or SMS segment costs"
+      >
         <SendRatesPanel
           rows={sendRows}
           sendRateNotes={sendNotes}
           myCode={myCountryCode}
           loading={sendLoad}
           error={sendErr}
+          showSms={isSmsEnabledForBusiness(bootstrap?.business)}
         />
-      </section>
-
-      {!creditsDataLoading && credits && credits.ledger.length > 0 && (
-        <section className={section} aria-labelledby="ledger-heading">
-          <SectionLabel id="ledger-heading">Recent activity</SectionLabel>
-          <ul className="mt-3 text-sm space-y-0 divide-y divide-slate-100/80">
-            {credits.ledger.map((row, i) => (
-              <li key={i} className="flex items-center justify-between gap-3 py-2.5 first:pt-0">
-                <div>
-                  <div className="text-slate-700 capitalize">{row.reason.replace(/_/g, " ")}</div>
-                  <div className="text-xs text-slate-400 tabular-nums">
-                    {shortDate(row.created_at, ledgerTimeZone)}
-                  </div>
-                </div>
-                <div
-                  className={[
-                    "text-sm font-medium tabular-nums shrink-0",
-                    row.delta < 0 ? "text-red-600" : "text-emerald-600",
-                  ].join(" ")}
-                >
-                  {row.delta > 0 ? "+" : ""}
-                  {row.delta}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
+      </Disclosure>
+        </>
       )}
     </div>
   );

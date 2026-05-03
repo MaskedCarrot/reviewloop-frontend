@@ -1,12 +1,12 @@
 import Link from "next/link";
-import type { Campaign } from "@/types";
+import type { Template } from "@/types";
 import StyledSelect from "@/components/StyledSelect";
 
 /**
  * Reusable: choose which email/SMS "Message" template a send uses, or the channel default.
  */
 export default function MessageTemplatePickers({
-  campaigns,
+  templates,
   emailTemplateId,
   smsTemplateId,
   onEmailChange,
@@ -14,7 +14,7 @@ export default function MessageTemplatePickers({
   showSms,
   idPrefix = "p",
 }: {
-  campaigns: Campaign[];
+  templates: Template[];
   emailTemplateId: string;
   smsTemplateId: string;
   onEmailChange: (id: string) => void;
@@ -24,9 +24,9 @@ export default function MessageTemplatePickers({
   idPrefix?: string;
 }) {
   const p = idPrefix;
-  const emailCamps = campaigns.filter((c) => c.channel === "email");
-  const smsCamps = campaigns.filter((c) => c.channel === "sms");
-  const hasAny = emailCamps.length > 0 || (showSms && smsCamps.length > 0);
+  const emailTemplates = templates.filter((c) => c.channel === "email");
+  const smsTemplates = templates.filter((c) => c.channel === "sms");
+  const hasAny = emailTemplates.length > 0 || (showSms && smsTemplates.length > 0);
   if (!hasAny) {
     return (
       <div className="rounded-lg border border-amber-200/80 bg-amber-50/50 px-3 py-2.5 text-xs text-amber-950/90">
@@ -40,7 +40,7 @@ export default function MessageTemplatePickers({
     );
   }
   return (
-    <div className="rounded-lg border border-slate-200/90 bg-slate-50/80 p-3 space-y-2.5 text-sm max-w-2xl">
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2.5 text-sm max-w-2xl">
       <p className="text-xs text-slate-600 leading-snug">
         <span className="font-medium text-slate-800">Message template (optional)</span> — for these sends. &quot;Default&quot; uses
         the one marked for each channel on the{" "}
@@ -50,7 +50,7 @@ export default function MessageTemplatePickers({
         page.
       </p>
       <div className="grid sm:grid-cols-2 gap-2">
-        {emailCamps.length > 0 && (
+        {emailTemplates.length > 0 && (
           <div>
             <label className="label text-xs" htmlFor={`${p}-mt-email`}>
               Email sends
@@ -62,7 +62,7 @@ export default function MessageTemplatePickers({
               onChange={(e) => onEmailChange(e.target.value)}
             >
               <option value="">Default (per Message page)</option>
-              {emailCamps.map((c) => (
+              {emailTemplates.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                   {c.is_default ? " — default" : ""}
@@ -71,7 +71,7 @@ export default function MessageTemplatePickers({
             </StyledSelect>
           </div>
         )}
-        {showSms && smsCamps.length > 0 && (
+        {showSms && smsTemplates.length > 0 && (
           <div>
             <label className="label text-xs" htmlFor={`${p}-mt-sms`}>
               SMS sends
@@ -83,7 +83,7 @@ export default function MessageTemplatePickers({
               onChange={(e) => onSmsChange(e.target.value)}
             >
               <option value="">Default (per Message page)</option>
-              {smsCamps.map((c) => (
+              {smsTemplates.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                   {c.is_default ? " — default" : ""}

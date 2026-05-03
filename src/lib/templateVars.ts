@@ -1,13 +1,23 @@
 import { smsSegmentCount } from "./smsSegments";
 
+/** Appended at send time if the rendered SMS doesn't already contain opt-out language. */
+export const SMS_OPT_OUT_FOOTER = "\nReply STOP to opt out";
+
+const SMS_OPT_OUT_KEYWORDS = ["reply stop", "text stop", "opt out", "opt-out", "unsubscribe"];
+
+export function smsNeedsOptOutFooter(text: string): boolean {
+  const lower = text.toLowerCase();
+  return !SMS_OPT_OUT_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
 export function sampleRenderTemplate(
   template: string,
   opts: { businessName: string; timezone: string }
 ): string {
   const now = new Date();
   const tz = opts.timezone || "UTC";
-  const dateStr = new Intl.DateTimeFormat("en-GB", { timeZone: tz, dateStyle: "medium" }).format(now);
-  const timeStr = new Intl.DateTimeFormat("en-GB", { timeZone: tz, timeStyle: "short" }).format(now);
+  const dateStr = new Intl.DateTimeFormat(undefined, { timeZone: tz, dateStyle: "medium" }).format(now);
+  const timeStr = new Intl.DateTimeFormat(undefined, { timeZone: tz, timeStyle: "short" }).format(now);
   let out = template;
   out = out.replace(/\{name\}/g, "Alex");
   out = out.replace(/\{business\}/g, opts.businessName);
@@ -30,17 +40,24 @@ export function templateHasLink(body: string): boolean {
   return /\{link\}/.test(body);
 }
 
+export function templateHasBusiness(body: string): boolean {
+  return /\{business\}/.test(body);
+}
+
 export function estimateSmsCredits(
   templateBody: string,
   opts: { businessName: string; timezone: string },
   creditsPerSegment: number
-): { segments: number; credits: number; samplePlain: string } {
+): { segments: number; credits: number; samplePlain: string; footerAutoAppended: boolean } {
   const rendered = sampleRenderTemplate(templateBody, opts);
-  const samplePlain = smsPlainFromStyled(rendered);
+  const footerAutoAppended = smsNeedsOptOutFooter(rendered);
+  const withFooter = footerAutoAppended ? rendered + SMS_OPT_OUT_FOOTER : rendered;
+  const samplePlain = smsPlainFromStyled(withFooter);
   const segments = smsSegmentCount(samplePlain);
   return {
     segments,
     credits: Math.max(1, creditsPerSegment) * segments,
     samplePlain,
+    footerAutoAppended,
   };
 }

@@ -1,6 +1,6 @@
 /**
- * HTTP client and ReviewLoop API surface. Split across `config`, `client`, `reviewloopApi` for maintainability;
+ * HTTP client and GoodWord API surface. Split across `config`, `client`, `goodwordApi` for maintainability;
  * import from `@/lib/api` as before.
  */
 export * from "./config";
-export * from "./reviewloopApi";
+export * from "./goodwordApi";

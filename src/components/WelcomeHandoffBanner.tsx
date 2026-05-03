@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-const STORAGE = "reviewloop_welcome_dismissed";
+const STORAGE = "goodword_welcome_dismissed";
 
 export default function WelcomeHandoffBanner() {
   const router = useRouter();
@@ -28,7 +28,7 @@ export default function WelcomeHandoffBanner() {
   return (
     <div className="rounded-xl border border-brand-200/80 bg-brand-50/80 px-4 py-3 sm:px-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
       <p className="text-sm text-slate-800">
-        <span className="font-medium">Setup is complete.</span> Open People to add your first contact, or Message to
+        <span className="font-medium">Setup is complete.</span> Open People to add your first contact, or Templates to
         adjust the text customers receive.
       </p>
       <div className="flex flex-wrap items-center gap-2 shrink-0">

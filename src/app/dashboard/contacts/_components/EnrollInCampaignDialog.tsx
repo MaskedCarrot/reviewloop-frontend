@@ -1,18 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-  enrollInSequenceBatched,
-  ENROLL_MAX_PER_REQUEST,
+  addCampaignRecipients,
   fetchAllContactIdsMatching,
   getIngestPresets,
-  getMyBusiness,
   listContacts,
   listMyLocations,
 } from "@/lib/api";
 import InfoTip from "@/components/InfoTip";
 import { ButtonSpinner, useAppToast } from "@/components/ToastProvider";
-import type { Business, BusinessLocation, Contact, IngestPresets } from "@/types";
+import type { BusinessLocation, Contact, IngestPresets } from "@/types";
 import { ContactListStoreFilter } from "./ContactStoreSelects";
 import { shortDate } from "./contactFormat";
 
@@ -43,18 +41,8 @@ export default function EnrollInCampaignDialog({ open, onOpenChange, sequenceId,
   const [allMatchingBusy, setAllMatchingBusy] = useState(false);
   const [ingestPresets, setIngestPresets] = useState<IngestPresets | null>(null);
   const [enrollLocations, setEnrollLocations] = useState<BusinessLocation[]>([]);
-  const [enrollDefaultLocationId, setEnrollDefaultLocationId] = useState<string | null>(null);
-  const [enrollStoreId, setEnrollStoreId] = useState("");
   const [searchListStoreId, setSearchListStoreId] = useState("");
   const toast = useAppToast();
-
-  const defaultStoreLabel = useMemo(() => {
-    if (!enrollDefaultLocationId) {
-      return "Default store (set under Settings if you add a store)";
-    }
-    const loc = enrollLocations.find((l) => l.id === enrollDefaultLocationId);
-    return loc ? `Default: ${loc.name}` : "Default business store";
-  }, [enrollDefaultLocationId, enrollLocations]);
 
   useEffect(() => {
     if (!open) return;
@@ -74,22 +62,15 @@ export default function EnrollInCampaignDialog({ open, onOpenChange, sequenceId,
       setEnrollError("");
       setIngestPresets(null);
       setEnrollLocations([]);
-      setEnrollDefaultLocationId(null);
-      setEnrollStoreId("");
       setSearchListStoreId("");
       return;
     }
     getIngestPresets()
       .then(setIngestPresets)
       .catch(() => setIngestPresets(null));
-    (async () => {
-      const [b, locs] = await Promise.all([
-        getMyBusiness().catch(() => ({ business: null })),
-        listMyLocations().catch(() => ({ locations: [] as BusinessLocation[], default_location_id: null as string | null })),
-      ]);
-      setEnrollDefaultLocationId((b.business as Business | null)?.default_location_id ?? locs.default_location_id ?? null);
-      setEnrollLocations(locs.locations);
-    })();
+    listMyLocations()
+      .then((locs) => setEnrollLocations(locs.locations))
+      .catch(() => {});
   }, [open, sequenceId]);
 
   useEffect(() => {
@@ -200,10 +181,8 @@ export default function EnrollInCampaignDialog({ open, onOpenChange, sequenceId,
     }
     setEnrollLoading(true);
     try {
-      const r = await enrollInSequenceBatched(sequenceId, Array.from(enrollPicked), {
-        locationId: enrollStoreId.trim() || null,
-      });
-      if (r.errors.length && r.enrolled.length === 0) {
+      const r = await addCampaignRecipients(sequenceId, Array.from(enrollPicked));
+      if (r.errors.length && r.added.length === 0) {
         setEnrollError(
           r.errors[0] ? `${r.errors[0].error} (${r.errors[0].contact_id.slice(0, 6)}…)` : "No one was added.",
         );
@@ -211,16 +190,16 @@ export default function EnrollInCampaignDialog({ open, onOpenChange, sequenceId,
       }
       onEnrolled();
       setEnrollPicked(new Set());
-      if (r.enrolled.length > 0) {
+      if (r.added.length > 0) {
         toast.success(
           r.errors.length
-            ? `Added ${r.enrolled.length} — ${r.errors.length} skipped`
-            : `Added ${r.enrolled.length} to this campaign`,
+            ? `Added ${r.added.length} — ${r.errors.length} skipped`
+            : `Added ${r.added.length} to this campaign`,
         );
       }
       if (r.errors.length) {
         setEnrollError(
-          `Added ${r.enrolled.length}. ${r.errors.length} skipped: ${r.errors[0].error}…`,
+          `Added ${r.added.length}. ${r.errors.length} skipped: ${r.errors[0].error}…`,
         );
         return;
       }
@@ -254,8 +233,7 @@ export default function EnrollInCampaignDialog({ open, onOpenChange, sequenceId,
               <p>
                 Search and date range match the <strong>People</strong> list (same as List tab). The table is a
                 sample — use <strong>Everyone matching</strong> to load every id, then add. We skip people already in this
-                campaign and dedupe. Adds go in API batches of {ENROLL_MAX_PER_REQUEST} contacts. You can do the same from
-                the list with <strong>All matching</strong>.
+                campaign and dedupe. You can do the same from the list with <strong>All matching</strong>.
               </p>
             </InfoTip>
           </div>
@@ -271,7 +249,7 @@ export default function EnrollInCampaignDialog({ open, onOpenChange, sequenceId,
               <input
                 id="enroll-search"
                 className="input mt-0.5 w-full h-9 text-sm"
-                placeholder="Name, email, external ref…"
+                placeholder="Name, email, phone, external ref…"
                 value={enrollSearch}
                 onChange={(e) => setEnrollSearch(e.target.value)}
               />
@@ -296,7 +274,7 @@ export default function EnrollInCampaignDialog({ open, onOpenChange, sequenceId,
               <div className="mt-0.5 flex flex-wrap gap-1.5">
                 <button
                   type="button"
-                  className="h-9 px-2.5 text-xs rounded-lg border border-slate-200 bg-slate-50/80 text-slate-800 hover:bg-slate-100 disabled:opacity-50"
+                  className="h-9 px-2.5 text-xs rounded-lg border border-slate-200 bg-slate-50 text-slate-800 hover:bg-slate-100 disabled:opacity-50"
                   disabled={!ingestPresets}
                   onClick={() => {
                     if (!ingestPresets) return;
@@ -308,7 +286,7 @@ export default function EnrollInCampaignDialog({ open, onOpenChange, sequenceId,
                 </button>
                 <button
                   type="button"
-                  className="h-9 px-2.5 text-xs rounded-lg border border-slate-200 bg-slate-50/80 text-slate-800 hover:bg-slate-100 disabled:opacity-50"
+                  className="h-9 px-2.5 text-xs rounded-lg border border-slate-200 bg-slate-50 text-slate-800 hover:bg-slate-100 disabled:opacity-50"
                   disabled={!ingestPresets}
                   onClick={() => {
                     if (!ingestPresets) return;
@@ -320,7 +298,7 @@ export default function EnrollInCampaignDialog({ open, onOpenChange, sequenceId,
                 </button>
                 <button
                   type="button"
-                  className="h-9 px-2.5 text-xs rounded-lg border border-slate-200 bg-slate-50/80 text-slate-800 hover:bg-slate-100 disabled:opacity-50"
+                  className="h-9 px-2.5 text-xs rounded-lg border border-slate-200 bg-slate-50 text-slate-800 hover:bg-slate-100 disabled:opacity-50"
                   disabled={!ingestPresets}
                   onClick={() => {
                     if (!ingestPresets) return;
@@ -376,26 +354,19 @@ export default function EnrollInCampaignDialog({ open, onOpenChange, sequenceId,
           </div>
           {enrollLocations.length > 1 ? (
             <div className="mt-3 min-w-0 sm:max-w-md">
-              <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500" htmlFor="enroll-store">
-                Store
+              <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500" htmlFor="enroll-list-store-filter">
+                Filter by store
               </label>
-              <select
-                id="enroll-store"
-                className="input mt-0.5 w-full h-9 text-sm"
-                value={enrollStoreId}
-                onChange={(e) => setEnrollStoreId(e.target.value)}
-              >
-                <option value="">{defaultStoreLabel}</option>
-                {enrollLocations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.name}
-                  </option>
-                ))}
-              </select>
+              <ContactListStoreFilter
+                className="mt-0.5"
+                id="enroll-list-store-filter"
+                locations={enrollLocations}
+                value={searchListStoreId}
+                onChange={setSearchListStoreId}
+                disabled={enrollLoading}
+              />
               <p className="text-[10px] text-slate-500 mt-1">
-                {enrollDefaultLocationId
-                  ? "First messages use the selected store's review links. The default is your business default store."
-                  : "Pick which store's Google/Yelp/Review links to use. With no default store set, we still resolve a store for each send; choose a store to pin this add."}
+                Filters the preview. Store assignment uses the campaign&rsquo;s configured location.
               </p>
             </div>
           ) : null}
@@ -448,7 +419,7 @@ export default function EnrollInCampaignDialog({ open, onOpenChange, sequenceId,
                         {p.name || p.email || p.phone_e164 || p.id}
                         {p.unsubscribed_at ? <span className="text-amber-700/90"> · opted out</span> : null}
                         {p.unsubscribed_at && p.last_message_at ? (
-                          <span className="text-slate-400"> · last send {shortDate(p.last_message_at)}</span>
+                          <span className="text-slate-500"> · last send {shortDate(p.last_message_at)}</span>
                         ) : null}
                       </span>
                     </label>

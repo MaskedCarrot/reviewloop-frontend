@@ -83,7 +83,7 @@ export default function QrPrintPage() {
   const spec = getPageSizeSpec(pageKey);
 
   useEffect(() => {
-    const id = "reviewloop-print-page-size";
+    const id = "goodword-print-page-size";
     let node = document.getElementById(id) as HTMLStyleElement | null;
     if (!node) {
       node = document.createElement("style");

@@ -21,7 +21,7 @@ export default function BillingPageSkeleton() {
               <ShimmerBlock className="h-2.5 w-44" />
             </div>
           </div>
-          <div className="sm:max-w-xs w-full sm:text-right border-t border-slate-100/90 pt-3 sm:border-0 sm:pt-0 space-y-1.5">
+          <div className="sm:max-w-xs w-full sm:text-right border-t border-slate-200 pt-3 sm:border-0 sm:pt-0 space-y-1.5">
             <ShimmerBlock className="h-2 w-24 sm:ml-auto" />
             <ShimmerBlock className="h-3.5 w-48 sm:ml-auto" />
             <ShimmerBlock className="h-2.5 w-40 sm:ml-auto" />
@@ -39,7 +39,7 @@ export default function BillingPageSkeleton() {
           {[0, 1].map((i) => (
             <li
               key={i}
-              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-3 border-b border-slate-100/80 last:border-0 first:pt-0"
+              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-3 border-b border-slate-200 last:border-0 first:pt-0"
             >
               <div className="space-y-1.5 flex-1 min-w-0 max-w-md">
                 <ShimmerBlock className="h-3.5 w-full max-w-[12rem]" />

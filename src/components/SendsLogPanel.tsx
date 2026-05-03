@@ -14,13 +14,11 @@ function shortDate(iso: string) {
   }
 }
 
-const STATUS_PILL: Record<ScheduledMessage["status"], string> = {
+const STATUS_PILL: Partial<Record<ScheduledMessage["status"], string>> = {
   scheduled: "bg-amber-50 text-amber-900 border-amber-200/80",
   sending: "bg-sky-50 text-sky-900 border-sky-200/80",
   sent: "bg-emerald-50 text-emerald-900 border-emerald-200/80",
   failed: "bg-red-50 text-red-900 border-red-200/80",
-  skipped: "bg-slate-100 text-slate-700 border-slate-200/80",
-  cancelled: "bg-slate-100 text-slate-600 border-slate-200/80",
 };
 
 function contactLine(c: Contact | undefined): { title: string; sub: string } {
@@ -42,7 +40,7 @@ export default function SendsLogPanel() {
   const [error, setError] = useState("");
 
   const [filterCh, setFilterCh] = useState<"all" | "email" | "sms">("all");
-  const [filterStatus, setFilterStatus] = useState<"all" | "sent" | "scheduled" | "other">("all");
+  const [filterStatus, setFilterStatus] = useState<"all" | "sent" | "scheduled" | "failed">("all");
 
   const load = useCallback(async () => {
     setError("");
@@ -71,11 +69,13 @@ export default function SendsLogPanel() {
 
   const rows = useMemo(() => {
     return messages.filter((m) => {
+      if (m.status === "paused" || m.status === "cancelled") return false;
       if (filterCh !== "all" && m.channel !== filterCh) return false;
       if (filterStatus === "all") return true;
       if (filterStatus === "sent") return m.status === "sent";
-      if (filterStatus === "scheduled") return m.status === "scheduled";
-      return m.status !== "sent" && m.status !== "scheduled";
+      if (filterStatus === "scheduled") return m.status === "scheduled" || m.status === "sending";
+      if (filterStatus === "failed") return m.status === "failed";
+      return true;
     });
   }, [messages, filterCh, filterStatus]);
 
@@ -87,7 +87,7 @@ export default function SendsLogPanel() {
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-slate-500 mr-1">Channel</span>
+        <span className="text-xs font-medium text-slate-600 mr-1">Channel</span>
         {(
           [
             ["all", "All"],
@@ -109,13 +109,13 @@ export default function SendsLogPanel() {
             {label}
           </button>
         ))}
-        <span className="text-xs font-medium text-slate-500 ml-2 mr-1">Status</span>
+        <span className="text-xs font-medium text-slate-600 ml-2 mr-1">Status</span>
         {(
           [
             ["all", "All"],
             ["sent", "Sent"],
             ["scheduled", "Scheduled"],
-            ["other", "Other"],
+            ["failed", "Failed"],
           ] as const
         ).map(([v, label]) => (
           <button
@@ -150,7 +150,7 @@ export default function SendsLogPanel() {
       ) : rows.length === 0 ? (
         <div className="card p-10 text-center">
           <h2 className="text-sm font-medium text-slate-900">No messages match</h2>
-          <p className="text-sm text-slate-500 mt-1.5 max-w-md mx-auto">
+          <p className="text-sm text-slate-600 mt-1.5 max-w-md mx-auto">
             {messages.length === 0
               ? "Queue a review request from the List tab, or import a CSV — your log will show up here."
               : "Try a different filter, or clear filters to see everything."}
@@ -163,11 +163,11 @@ export default function SendsLogPanel() {
           </Link>
         </div>
       ) : (
-        <div className="rounded-xl border border-slate-200/80 bg-white overflow-hidden shadow-sm">
+        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[720px]">
               <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/90 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
                   <th className="px-3 py-2.5 sm:px-4">Channel</th>
                   <th className="px-3 py-2.5 sm:px-4">To</th>
                   <th className="px-3 py-2.5 sm:px-4">Review page</th>
@@ -184,7 +184,7 @@ export default function SendsLogPanel() {
                   const origin = PUBLIC_SITE_ORIGIN.replace(/\/$/, "");
                   const reviewPageUrl = m.routing_token ? `${origin}/r/${m.routing_token}` : null;
                   return (
-                    <tr key={m.id} className="hover:bg-slate-50/60">
+                    <tr key={m.id} className="hover:bg-slate-50">
                       <td className="px-3 py-3 sm:px-4 align-top">
                         <span
                           className={[
@@ -199,7 +199,7 @@ export default function SendsLogPanel() {
                         <div className="font-medium text-slate-900 truncate" title={line.title}>
                           {line.title}
                         </div>
-                        <div className="text-xs text-slate-500 break-words">{line.sub}</div>
+                        <div className="text-xs text-slate-600 break-words">{line.sub}</div>
                       </td>
                       <td className="px-3 py-3 sm:px-4 align-top max-w-[10rem]">
                         {reviewPageUrl ? (
@@ -225,8 +225,8 @@ export default function SendsLogPanel() {
                         >
                           {m.status}
                         </span>
-                        {m.error && m.status === "failed" && (
-                          <p className="text-[11px] text-red-600 mt-1 max-w-xs">{m.error}</p>
+                        {m.error_detail && m.status === "failed" && (
+                          <p className="text-[11px] text-red-600 mt-1 max-w-xs">{m.error_detail}</p>
                         )}
                       </td>
                       <td className="px-3 py-3 sm:px-4 align-top text-slate-600 tabular-nums text-xs">

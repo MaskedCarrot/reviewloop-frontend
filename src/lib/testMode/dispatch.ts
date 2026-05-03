@@ -1,4 +1,4 @@
-import type { Business, BusinessLocation, Contact, ReviewDestination, ScheduledMessage } from "@/types";
+import type { Business, BusinessLocation, Campaign, Contact, ReviewDestination, ScheduledMessage, Template } from "@/types";
 import sendRatesIso from "@/data/iso3166-slim-2.json";
 import { computeIngestPresetsForZone, ymdInZoneToUtcBoundsMs } from "@/lib/ingestDateBounds";
 import { EMAIL_CREDIT, LOCAL_DEMO_FLAG, PRO_MONTHLY_CREDITS, SMS_CREDIT, TEST_USER_ID, TOPUP_BY_KEY } from "./ids";
@@ -17,78 +17,51 @@ import {
   resetTestState,
 } from "./state";
 
-/** In-memory follow-up campaign defs for browser test mode (lost on full reload). */
-type MockSequenceRow = {
-  id: string;
-  name: string;
-  is_active: boolean;
-  location_id: string | null;
-  review_link_style: "hosted" | "direct_google" | "direct_yelp";
-  steps: { campaign_id: string; delay_after_previous_minutes: number; step_index: number }[];
-  created_at: string;
-  updated_at: string;
-};
-const mockSequenceStore: MockSequenceRow[] = [];
-
-type MockSequenceEnrollment = {
-  enrollment_id: string;
-  sequence_id: string;
+type MockCampaignRecipient = {
+  recipient_id: string;
+  campaign_id: string;
   contact_id: string;
-  status: "active" | "completed" | "stopped_replied" | "cancelled";
-  created_at: string;
+  status: "pending" | "active" | "completed" | "stopped";
+  current_step: number;
+  enrolled_at: string;
   updated_at: string;
 };
-const mockSequenceEnrollments: MockSequenceEnrollment[] = [];
+const mockCampaignRecipients: MockCampaignRecipient[] = [];
 
-/** Clear follow-up campaign rows when re-seeding demo or deleting the test account. */
 export function resetMockSessionStores() {
-  mockSequenceStore.length = 0;
-  mockSequenceEnrollments.length = 0;
-}
-
-function activeEnrollmentCount(seqId: string) {
-  return mockSequenceEnrollments.filter((e) => e.sequence_id === seqId && e.status === "active").length;
-}
-
-function enrollmentStatsAggregate(seqId: string) {
-  const list = mockSequenceEnrollments.filter((e) => e.sequence_id === seqId);
-  return {
-    total: list.length,
-    active: list.filter((e) => e.status === "active").length,
-    completed: list.filter((e) => e.status === "completed").length,
-    stopped_replied: list.filter((e) => e.status === "stopped_replied").length,
-    cancelled: list.filter((e) => e.status === "cancelled").length,
-  };
+  mockCampaignRecipients.length = 0;
 }
 
 const SMS_OK = (cc: string) => ["GB", "IE", "US", "AU", "NZ", "DE", "FR", "ES", "IT", "NL"].includes((cc || "").toUpperCase());
 
-function mockSequenceToDetail(r: MockSequenceRow) {
-  const campIndex = (cid: string) => getTestState().campaigns.find((c) => c.id === cid) || null;
-  const steps = r.steps.map((s) => ({
-    id: `${r.id}-st-${s.step_index}`,
-    sequence_id: r.id,
-    step_index: s.step_index,
-    campaign_id: s.campaign_id,
-    delay_after_previous_minutes: s.delay_after_previous_minutes,
-    campaign: campIndex(s.campaign_id),
-  }));
-  return {
-    id: r.id,
-    name: r.name,
-    is_active: r.is_active,
-    business_id: getTestState().business.id,
-    location_id: r.location_id,
-    review_link_style: r.review_link_style,
-    created_at: r.created_at,
-    updated_at: r.updated_at,
-    steps,
-  };
+const _TEST_PLATFORM_LABEL: Record<string, string> = {
+  google: "Google",
+  yelp: "Yelp",
+  facebook: "Facebook",
+  tripadvisor: "TripAdvisor",
+  fb: "Facebook",
+  trustpilot: "Trustpilot",
+};
+
+/** Mirrors backend `build_review_destinations` for the browser mock API. */
+function testReviewDestinationsForLocation(loc: BusinessLocation | undefined): ReviewDestination[] {
+  if (!loc) return [];
+  const out: ReviewDestination[] = [];
+  const pl = loc.platform_links || {};
+  for (const [pid, url] of Object.entries(pl)) {
+    const u = (url || "").trim();
+    if (!u.toLowerCase().startsWith("https://")) continue;
+    out.push({
+      id: pid,
+      label: _TEST_PLATFORM_LABEL[pid] || _TEST_PLATFORM_LABEL[pid.toLowerCase()] || pid,
+      url: u,
+    });
+  }
+  return out;
 }
 
 function requireUser(uid: string | null): void {
   if (!uid) throw new Error("Missing session");
-  // All mock data is local; any non-empty X-User-Id is ok (stale Google ids are common after toggling test mode).
 }
 
 function nowIso() {
@@ -108,69 +81,48 @@ function normPhone(v: string | null | undefined): string | null {
   return t;
 }
 
-function pickDefaultCampaign(s: TestModeState, channel: "email" | "sms") {
-  return s.campaigns.find((c) => c.channel === channel && c.is_default) || s.campaigns.find((c) => c.channel === channel);
+/**
+ * Find an existing contact in the same business by email (case-insensitive)
+ * or phone (E.164). Mirrors the server's ``upsert_contact`` lookup so the
+ * in-browser test fixture enforces the same uniqueness as the real DB.
+ */
+function findContactByEmailOrPhone(
+  contacts: Contact[],
+  businessId: string,
+  email: string | null,
+  phone: string | null,
+): Contact | null {
+  if (email) {
+    const m = contacts.find(
+      (c) =>
+        c.business_id === businessId &&
+        (c.email || "").toLowerCase() === email,
+    );
+    if (m) return m;
+  }
+  if (phone) {
+    const m = contacts.find(
+      (c) => c.business_id === businessId && (c.phone_e164 || "") === phone,
+    );
+    if (m) return m;
+  }
+  return null;
 }
 
-function pickCampaignForChannel(
-  s: TestModeState,
-  ch: "email" | "sms",
-  campaignId: string | null | undefined
-) {
-  const id = (campaignId || "").trim();
+function pickTemplateForChannel(s: TestModeState, ch: "email" | "sms", templateId?: string | null): Template {
+  const id = (templateId || "").trim();
   if (id) {
-    const c = s.campaigns.find((x) => x.id === id);
-    if (!c) throw new Error("Campaign not found");
-    if (c.channel !== ch) throw new Error("Selected template is for a different channel than this send");
-    return c;
+    const t = s.templates.find((x) => x.id === id);
+    if (!t) throw new Error("Template not found");
+    if (t.channel !== ch) throw new Error("Selected template is for a different channel than this send");
+    return t;
   }
-  const d = pickDefaultCampaign(s, ch);
-  if (!d) throw new Error("No campaign");
+  const d = s.templates.find((t) => t.channel === ch && t.is_default) || s.templates.find((t) => t.channel === ch);
+  if (!d) throw new Error("No template found for this channel");
   return d;
 }
 
-function defaultDelayMins(b: Business, camp: { delay_minutes: number } | null) {
-  return camp ? camp.delay_minutes : b.default_send_delay_minutes || 60;
-}
-
-const _TEST_PLATFORM_LABEL: Record<string, string> = {
-  yelp: "Yelp",
-  facebook: "Facebook",
-  tripadvisor: "TripAdvisor",
-  fb: "Facebook",
-  trustpilot: "Trustpilot",
-};
-
-/** Mirrors backend `build_review_destinations` for the browser mock API. */
-function testReviewDestinationsForLocation(
-  loc: BusinessLocation | undefined,
-  fallbackGmb: string,
-): ReviewDestination[] {
-  if (!loc) {
-    const g = (fallbackGmb || "").trim();
-    return g ? [{ id: "google", label: "Google", url: g }] : [];
-  }
-  const out: ReviewDestination[] = [];
-  const gmb = (loc.gmb_review_url || "").trim();
-  if (gmb) out.push({ id: "google", label: "Google", url: gmb });
-  const pl = loc.platform_links || {};
-  for (const [pid, url] of Object.entries(pl)) {
-    const u = (url || "").trim();
-    if (!u.toLowerCase().startsWith("https://")) continue;
-    out.push({
-      id: pid,
-      label: _TEST_PLATFORM_LABEL[pid] || _TEST_PLATFORM_LABEL[pid.toLowerCase()] || pid,
-      url: u,
-    });
-  }
-  return out;
-}
-
-function resolveChannel(
-  b: Business,
-  c: Contact,
-  prefer?: "auto" | "email" | "sms"
-): "email" | "sms" {
+function resolveChannel(b: Business, c: Contact, prefer?: "auto" | "email" | "sms"): "email" | "sms" {
   if (prefer === "email") {
     if (!c.email) throw new Error("Contact has no email address");
     return "email";
@@ -186,25 +138,73 @@ function resolveChannel(
 }
 
 function scheduleSendAt(b: Business, delayMin: number) {
-  return new Date(Date.now() + Math.max(0, delayMin) * 60e3).toISOString();
+  const baseMs = Date.now() + Math.max(0, delayMin) * 60e3;
+  return applyQuietHours(new Date(baseMs), b).toISOString();
 }
 
-function costFor(s: TestModeState, b: Business, ch: "email" | "sms", camp: { id: string } | null) {
-  if (ch === "email") return EMAIL_CREDIT;
-  return SMS_CREDIT; // 1 seg approx
+/** "HH:MM" → minutes since 00:00, or null for invalid input. */
+function parseHHMMtoMinutes(s: string | null | undefined): number | null {
+  if (!s) return null;
+  const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(s.trim());
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
 }
 
-function resolveTestLocationIdForSend(
-  s: TestModeState,
-  contact: Contact,
-  camp: { id: string; location_id?: string | null } | null,
-): string | null {
-  if (camp && (camp.location_id || "").toString().trim()) {
-    const lid = (camp.location_id as string).toString().trim();
-    if (s.locations?.some((l) => l.id === lid)) return lid;
+/** True iff `mins` (0..1440) falls in the half-open window [start, end), with wrap support. */
+function inQuietWindow(mins: number, start: number, end: number): boolean {
+  if (start === end) return false;
+  return start < end ? mins >= start && mins < end : mins >= start || mins < end;
+}
+
+/** Mirrors shared-backend/modules/goodword/quiet_hours.py so test-mode behaviour matches prod. */
+function applyQuietHours(sendAt: Date, biz: Business): Date {
+  if (!biz?.quiet_hours_enabled) return sendAt;
+  const startMin = parseHHMMtoMinutes(biz.quiet_hours_start ?? null);
+  const endMin = parseHHMMtoMinutes(biz.quiet_hours_end ?? null);
+  if (startMin == null || endMin == null || startMin === endMin) return sendAt;
+
+  // Read the wall-clock time *as if* it were in the business timezone. The browser
+  // doesn't ship a free zoneinfo lookup, so we use Intl to extract the local hh:mm
+  // for the chosen tz at sendAt; that's enough to decide if we're inside the window.
+  const tz = (biz.timezone || "UTC").trim() || "UTC";
+  let hh = sendAt.getUTCHours();
+  let mm = sendAt.getUTCMinutes();
+  try {
+    const fmt = new Intl.DateTimeFormat("en-GB", {
+      timeZone: tz,
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    const parts = fmt.formatToParts(sendAt);
+    const h = parts.find((p) => p.type === "hour")?.value;
+    const m = parts.find((p) => p.type === "minute")?.value;
+    if (h && m) {
+      hh = parseInt(h, 10);
+      mm = parseInt(m, 10);
+    }
+  } catch {
+    // unknown tz — fall back to UTC; better than swallowing every send
   }
+  const localMin = hh * 60 + mm;
+  if (!inQuietWindow(localMin, startMin, endMin)) return sendAt;
+
+  // Push forward to the next moment when we exit the window. Compute in the
+  // local tz frame, then convert back to a real instant. Edge case: when the
+  // window wraps past midnight and we're in the post-midnight half, "end" is
+  // still on the same calendar day.
+  let minutesUntilEnd = endMin - localMin;
+  if (minutesUntilEnd <= 0) minutesUntilEnd += 24 * 60;
+  return new Date(sendAt.getTime() + minutesUntilEnd * 60_000);
+}
+
+function costFor(_s: TestModeState, _b: Business, ch: "email" | "sms") {
+  return ch === "email" ? EMAIL_CREDIT : SMS_CREDIT;
+}
+
+function resolveTestLocationIdForSend(s: TestModeState, contact: Contact): string | null {
   if (contact.location_id) return contact.location_id;
-  if (s.business.default_location_id) return s.business.default_location_id;
+  if (s.default_location_id) return s.default_location_id;
   return s.locations?.[0]?.id ?? null;
 }
 
@@ -212,22 +212,24 @@ function enqueue(
   s: TestModeState,
   contact: Contact,
   ch: "email" | "sms",
-  campaignId?: string | null
+  templateId?: string | null,
 ): { message: ScheduledMessage; routing_token: string } {
   const b = s.business;
-  const camp = pickCampaignForChannel(s, ch, campaignId);
-  const locId = resolveTestLocationIdForSend(s, contact, camp);
+  const templ = pickTemplateForChannel(s, ch, templateId);
+  const locId = resolveTestLocationIdForSend(s, contact);
   const m: ScheduledMessage = {
     id: newId(),
     business_id: b.id,
     contact_id: contact.id,
-    campaign_id: camp.id,
+    template_id: templ.id,
+    campaign_id: null,
+    campaign_step_index: null,
     channel: ch,
-    send_at: scheduleSendAt(b, defaultDelayMins(b, camp)),
+    send_at: scheduleSendAt(b, 60),
     status: "scheduled",
     provider_id: null,
-    error: null,
-    cost_credits: costFor(s, b, ch, camp),
+    error_detail: null,
+    cost_credits: costFor(s, b, ch),
     sent_at: null,
     created_at: nowIso(),
     location_id: locId ?? null,
@@ -250,7 +252,7 @@ export function dispatchTestMode(
   method: string,
   body: unknown,
   userId: string | null,
-  auth: boolean
+  auth: boolean,
 ): unknown {
   const u = new URL(fullPath, "https://test.local");
   const path = u.pathname;
@@ -259,16 +261,15 @@ export function dispatchTestMode(
   const readBody = (b: unknown) => (b && typeof b === "object" ? (b as Record<string, unknown>) : {});
 
   // no auth
-  if (method === "GET" && path === "/api/reviewloop/config") {
+  if (method === "GET" && path === "/api/goodword/config") {
     return {
       country_allowlist: ["GB", "IE", "US", "AU", "NZ", "DE", "FR", "ES", "IT", "NL", "SE", "DK", "NO", "FI", "CH", "BE", "AT", "PT", "PL"],
       sms_supported_countries: ["GB", "IE", "US", "AU", "NZ", "DE", "FR", "ES", "IT", "NL", "SE", "DK", "NO", "FI", "CH", "BE", "AT", "PT", "PL"],
       email_credits: EMAIL_CREDIT,
       sms_credits: SMS_CREDIT,
       credit_rate_notes: "In-app preview: fixed test rates. Production uses your host's per-country file.",
-      // Same shape as `list_platforms_for_config_api()` so Store locations + chips show every supported site in local mock.
       review_platforms: [
-        { id: "google", label: "Google", description: "Link from your Google Business profile", link_source: "gmb", sort: 0 },
+        { id: "google", label: "Google", description: "Link from your Google Business profile", link_source: "custom", sort: 0 },
         { id: "yelp", label: "Yelp", description: "Link to your business on Yelp", link_source: "custom", sort: 10 },
         { id: "facebook", label: "Facebook", description: "Page or review link on Facebook", link_source: "custom", sort: 20 },
         { id: "tripadvisor", label: "TripAdvisor", description: "Property link on TripAdvisor", link_source: "custom", sort: 30 },
@@ -277,7 +278,7 @@ export function dispatchTestMode(
     };
   }
 
-  if (method === "GET" && path === "/api/reviewloop/config/send-rates") {
+  if (method === "GET" && path === "/api/goodword/config/send-rates") {
     const countries = (sendRatesIso as { code: string; name: string }[]).map((c) => {
       const code = c.code;
       return {
@@ -290,28 +291,26 @@ export function dispatchTestMode(
     });
     return {
       send_rate_notes:
-        "In-app preview: example rates (higher US SMS in sample). Production values come from your host send_rates in reviewloop_pricing.yaml.",
+        "In-app preview: example rates (higher US SMS in sample). Production values come from your host send_rates in goodword_pricing.yaml.",
       countries,
     };
   }
 
-  if (method === "GET" && path === "/api/reviewloop/config/membership-preview") {
+  if (method === "GET" && path === "/api/goodword/config/membership-preview") {
     const raw = (q.get("country") || "").trim();
     const cc = raw.length === 2 ? raw.toUpperCase() : null;
-    const mPro = cc === "US" ? 250 : 200;
     return {
       country_code: cc,
       tiers: [
-        { key: "pro", display_name: "Pro", display_price: "$7 / month", monthly_credits: mPro, polar_configured: true },
-        { key: "pro_500", display_name: "Pro 500", display_price: "$15 / month", monthly_credits: 500, polar_configured: true },
+        { key: "pro", display_name: "Pro", display_price: "$9 / month", monthly_credits: 500, polar_configured: true },
       ],
-      notes: "Test mode: sample Pro tiers. Live stack uses your pricing YAML and business country at checkout.",
+      notes: "Test mode: single Pro tier. Live stack uses your pricing YAML and business country at checkout.",
     };
   }
 
-  if (method === "GET" && path === "/api/reviewloop/me/credit-rates") {
+  if (method === "GET" && path === "/api/goodword/me/credit-rates") {
     return {
-      country_code: (getTestState().business?.country_code || "GB").toUpperCase(),
+      country_code: (getTestState().business?.country_code || "US").toUpperCase(),
       email_credits: EMAIL_CREDIT,
       sms_credits_per_segment: SMS_CREDIT,
       source: "default",
@@ -319,25 +318,24 @@ export function dispatchTestMode(
     };
   }
 
-  if (method === "GET" && path === "/api/reviewloop/me/membership-offers") {
+  if (method === "GET" && path === "/api/goodword/me/membership-offers") {
     return {
-      country_code: (getTestState().business?.country_code || "GB").toUpperCase(),
+      country_code: (getTestState().business?.country_code || "US").toUpperCase(),
       tiers: [
-        { key: "pro", display_name: "Pro", display_price: "$7 / month", monthly_credits: 200, polar_configured: true },
-        { key: "pro_500", display_name: "Pro 500", display_price: "$15 / month", monthly_credits: 500, polar_configured: true },
+        { key: "pro", display_name: "Pro", display_price: "$9 / month", monthly_credits: 500, polar_configured: true },
       ],
-      notes: "Test mode: two sample Pro options. Live stack uses your pricing YAML and Polar product ids.",
+      notes: "Test mode: single Pro tier. Live stack uses your pricing YAML and Polar product ids.",
     };
   }
 
+  // public routing
   {
-    const rpub = path.match(/^\/api\/reviewloop\/public\/r\/([^/]+)$/);
+    const rpub = path.match(/^\/api\/goodword\/public\/r\/([^/]+)$/);
     if (rpub && method === "GET") {
-      let biz: {
+      let bizInfo: {
         id: string;
         name: string;
         from_name: string | null;
-        gmb_review_url: string;
         branding_color: string;
         review_destinations: ReviewDestination[];
         location_id: string | null;
@@ -350,8 +348,7 @@ export function dispatchTestMode(
         const loc = msg?.location_id
           ? locs.find((l) => l.id === msg.location_id)
           : locs.find((l) => l.is_default) || locs[0];
-        const review_destinations = testReviewDestinationsForLocation(loc, s.business.gmb_review_url);
-        const gmbForBiz = (review_destinations.find((d) => d.id === "google")?.url || "").trim();
+        const review_destinations = testReviewDestinationsForLocation(loc);
         s.routingEvents.push({
           id: newId(),
           link_id: link.id,
@@ -361,74 +358,42 @@ export function dispatchTestMode(
           comment: null,
           created_at: nowIso(),
         });
-        biz = {
+        bizInfo = {
           id: s.business.id,
           name: s.business.name,
           from_name: s.business.from_name,
-          gmb_review_url: gmbForBiz,
           branding_color: s.business.branding_color,
           review_destinations,
           location_id: loc?.id ?? null,
         };
       });
-      return { business: biz! };
+      return { business: bizInfo! };
     }
   }
   {
-    const rcl = path.match(/^\/api\/reviewloop\/public\/r\/([^/]+)\/click-google$/);
-    if (rcl && method === "POST") {
-      let gmb: string;
-      mutate((s) => {
-        const link = s.links.find((l) => l.token === rcl[1]);
-        if (!link) throw new Error("Link not found");
-        const msg = s.messages.find((m) => m.id === link.message_id);
-        const locs = s.locations || [];
-        const loc = msg?.location_id
-          ? locs.find((l) => l.id === msg.location_id)
-          : locs.find((l) => l.is_default) || locs[0];
-        const dests = testReviewDestinationsForLocation(loc, s.business.gmb_review_url);
-        const hit = dests.find((d) => d.id === "google");
-        if (!hit?.url?.trim()) throw new Error("No Google review URL is set for this store");
-        gmb = hit.url.trim();
-        s.routingEvents.push({
-          id: newId(),
-          link_id: link.id,
-          business_id: link.business_id,
-          event: "click_google",
-          rating: null,
-          comment: null,
-          created_at: nowIso(),
-        });
-      });
-      return { ok: true, redirect_url: gmb! };
-    }
-  }
-  {
-    const rout = path.match(/^\/api\/reviewloop\/public\/r\/([^/]+)\/outbound$/);
-    if (rout && method === "POST") {
+    const rclick = path.match(/^\/api\/goodword\/public\/r\/([^/]+)\/click$/);
+    if (rclick && method === "POST") {
       const p = readBody(body) as { platform?: string };
-      const platform = String(p.platform || "")
-        .trim()
-        .toLowerCase();
+      const platform = String(p.platform || "").trim().toLowerCase();
       if (!platform) throw new Error("platform required");
       let redirect: string;
       mutate((s) => {
-        const link = s.links.find((l) => l.token === rout[1]);
+        const link = s.links.find((l) => l.token === rclick[1]);
         if (!link) throw new Error("Link not found");
         const msg = s.messages.find((m) => m.id === link.message_id);
         const locs = s.locations || [];
         const loc = msg?.location_id
           ? locs.find((l) => l.id === msg.location_id)
           : locs.find((l) => l.is_default) || locs[0];
-        const dests = testReviewDestinationsForLocation(loc, s.business.gmb_review_url);
+        const dests = testReviewDestinationsForLocation(loc);
         const hit = dests.find((d) => d.id === platform);
-        if (!hit) throw new Error("Unknown or unset destination for this request");
+        if (!hit) throw new Error("No URL configured for platform: " + platform);
         redirect = hit.url;
         s.routingEvents.push({
           id: newId(),
           link_id: link.id,
           business_id: link.business_id,
-          event: "click_outbound",
+          event: "click_platform",
           rating: null,
           comment: null,
           created_at: nowIso(),
@@ -439,7 +404,7 @@ export function dispatchTestMode(
     }
   }
   {
-    const rfb = path.match(/^\/api\/reviewloop\/public\/r\/([^/]+)\/feedback$/);
+    const rfb = path.match(/^\/api\/goodword\/public\/r\/([^/]+)\/feedback$/);
     if (rfb && method === "POST") {
       const p = readBody(body);
       mutate((s) => {
@@ -460,7 +425,26 @@ export function dispatchTestMode(
     }
   }
   {
-    const mq = path.match(/^\/api\/reviewloop\/public\/q\/([^/]+)$/);
+    const runsub = path.match(/^\/api\/goodword\/public\/r\/([^/]+)\/unsubscribe$/);
+    if (runsub && method === "POST") {
+      mutate((s) => {
+        const link = s.links.find((l) => l.token === runsub[1]);
+        if (!link) return; // idempotent — no-op if token unknown
+        const msg = s.messages.find((m) => m.id === link.message_id);
+        if (!msg) return;
+        const contact = s.contacts.find((c) => c.id === msg.contact_id);
+        if (contact && !contact.unsubscribed_at) {
+          contact.unsubscribed_at = nowIso();
+          for (const m of s.messages) {
+            if (m.contact_id === contact.id && m.status === "scheduled") m.status = "cancelled";
+          }
+        }
+      });
+      return { ok: true };
+    }
+  }
+  {
+    const mq = path.match(/^\/api\/goodword\/public\/q\/([^/]+)$/);
     if (mq && method === "GET") {
       const s = getTestState();
       if (s.business.id !== mq[1]) throw new Error("Business not found");
@@ -476,14 +460,12 @@ export function dispatchTestMode(
         loc = locs.find((l) => l.is_default) || locs[0];
         if (loc) resolvedLocId = loc.id;
       }
-      const review_destinations = testReviewDestinationsForLocation(loc, s.business.gmb_review_url);
-      const gmbForBiz = (review_destinations.find((d) => d.id === "google")?.url || "").trim();
+      const review_destinations = testReviewDestinationsForLocation(loc);
       return {
         business: {
           id: s.business.id,
           name: s.business.name,
           from_name: s.business.from_name,
-          gmb_review_url: gmbForBiz,
           branding_color: s.business.branding_color,
           review_destinations,
           location_id: resolvedLocId,
@@ -492,7 +474,7 @@ export function dispatchTestMode(
     }
   }
   {
-    const mq2 = path.match(/^\/api\/reviewloop\/public\/q\/([^/]+)\/optin$/);
+    const mq2 = path.match(/^\/api\/goodword\/public\/q\/([^/]+)\/optin$/);
     if (mq2 && method === "POST") {
       const p = readBody(body);
       if (!p.consent) throw new Error("Please tick the consent box to continue.");
@@ -504,21 +486,34 @@ export function dispatchTestMode(
         const locRaw = (p.location_id as string | undefined) && String(p.location_id).trim();
         const locOk = locRaw && s.locations?.some((l) => l.id === locRaw) ? locRaw : null;
         if (locRaw && !locOk) throw new Error("That store is not in this business");
-        const contact: Contact = {
-          id: newId(),
-          business_id: s.business.id,
-          name: (p.name as string) || null,
-          email: em,
-          phone_e164: ph,
-          source: "qr",
-          consent_attested_at: nowIso(),
-          unsubscribed_at: null,
-          last_message_at: null,
-          external_ref: null,
-          created_at: nowIso(),
-          location_id: locOk,
-        };
-        s.contacts = [contact, ...s.contacts];
+        // Dedup against the QR scanner's previous opt-ins by email/phone.
+        // Repeat scanners shouldn't produce a fresh contact every time.
+        const existing = findContactByEmailOrPhone(s.contacts, s.business.id, em, ph);
+        let contact: Contact;
+        if (existing) {
+          existing.name = (p.name as string) || existing.name;
+          if (em) existing.email = em;
+          if (ph) existing.phone_e164 = ph;
+          existing.consent_attested_at = nowIso();
+          if (locOk !== null) existing.location_id = locOk;
+          contact = existing;
+        } else {
+          contact = {
+            id: newId(),
+            business_id: s.business.id,
+            name: (p.name as string) || null,
+            email: em,
+            phone_e164: ph,
+            source: "qr",
+            consent_attested_at: nowIso(),
+            unsubscribed_at: null,
+            last_message_at: null,
+            external_ref: null,
+            created_at: nowIso(),
+            location_id: locOk,
+          };
+          s.contacts = [contact, ...s.contacts];
+        }
         const ch0 = (p.channel as "auto" | "email" | "sms" | undefined) || "auto";
         let cch: "email" | "sms";
         if (ch0 === "email") cch = "email";
@@ -536,13 +531,36 @@ export function dispatchTestMode(
     }
   }
 
+  {
+    const mqf = path.match(/^\/api\/goodword\/public\/q\/([^/]+)\/feedback$/);
+    if (mqf && method === "POST") {
+      const p = readBody(body) as {
+        rating?: number;
+        comment?: string;
+        name?: string;
+        email?: string;
+        phone?: string;
+        location_id?: string | null;
+      };
+      const rating = Number(p.rating) || 0;
+      if (rating < 1 || rating > 5) throw new Error("Rating must be 1–5.");
+      const s = getTestState();
+      if (s.business.id !== mqf[1]) throw new Error("Business not found");
+      // Local mock just acknowledges it — there's no routing-events log to write
+      // to in the in-browser test fixture, and no email is dispatched for
+      // private feedback. Real backend stores the row.
+      void p;
+      return { ok: true };
+    }
+  }
+
   if (method === "POST" && path === "/api/auth/google") {
     return { user: { ...getTestState().user } };
   }
-  if (method === "POST" && path === "/api/reviewloop/dev/bootstrap") {
+  if (method === "POST" && path === "/api/goodword/dev/bootstrap") {
     return { user: { ...getTestState().user }, seed: { seeded: true, test_mode: true } };
   }
-  if (method === "GET" && path === "/api/reviewloop/me") {
+  if (method === "GET" && path === "/api/goodword/me") {
     return { ...getTestState().user };
   }
   if (method === "GET" && path.startsWith("/api/users/")) {
@@ -553,7 +571,8 @@ export function dispatchTestMode(
 
   if (path === "/api/billing/checkout" && method === "POST") {
     const p = readBody(body) as { success_url?: string; tier_key?: string };
-    const grant = p.tier_key === "pro_500" ? 500 : PRO_MONTHLY_CREDITS;
+    void p;
+    const grant = PRO_MONTHLY_CREDITS;
     mutate((s) => {
       s.subscriptionPro = true;
       s.credits.balance += grant;
@@ -570,7 +589,7 @@ export function dispatchTestMode(
     });
     return { url: `${getPublicOriginForClientLinks()}/dashboard/billing?subscribed=ok&tier=${encodeURIComponent(p.tier_key || "pro")}` };
   }
-  if (path === "/api/reviewloop/me/credits/topup" && method === "POST") {
+  if (path === "/api/goodword/me/credits/topup" && method === "POST") {
     const p = readBody(body) as { pack_key: string; success_url?: string };
     const n = TOPUP_BY_KEY[p.pack_key];
     if (n == null) throw new Error("Unknown top-up");
@@ -585,11 +604,11 @@ export function dispatchTestMode(
     });
     return { url };
   }
-  if (path === "/api/reviewloop/me/credits" && method === "GET") {
+  if (path === "/api/goodword/me/credits" && method === "GET") {
     processDueSends();
     return { ...getTestState().credits, ledger: [...getTestState().credits.ledger] };
   }
-  if (path === "/api/reviewloop/me/credits/settings" && method === "PATCH") {
+  if (path === "/api/goodword/me/credits/settings" && method === "PATCH") {
     const p = readBody(body) as { low_balance_threshold: number };
     let out = 0;
     mutate((s) => {
@@ -598,20 +617,20 @@ export function dispatchTestMode(
     });
     return { low_balance_threshold: out };
   }
-  if (path === "/api/reviewloop/me/business" && method === "GET") {
+  if (path === "/api/goodword/me/business" && method === "GET") {
     return { business: { ...getTestState().business } };
   }
-  if (path === "/api/reviewloop/me/locations" && method === "GET") {
+  if (path === "/api/goodword/me/locations" && method === "GET") {
     const s = getTestState();
     const locs = s.locations ?? [];
     const withLinks = locs.map((loc) => ({ ...loc, platform_links: loc.platform_links || {} }));
     return {
       locations: withLinks,
-      default_location_id: s.business.default_location_id ?? null,
+      default_location_id: s.default_location_id ?? null,
     };
   }
   {
-    const mPlPut = path.match(/^\/api\/reviewloop\/me\/locations\/([^/]+)\/platform-links$/);
+    const mPlPut = path.match(/^\/api\/goodword\/me\/locations\/([^/]+)\/platform-links$/);
     if (mPlPut && method === "PUT") {
       const lid = mPlPut[1]!;
       const p = readBody(body) as { links?: Record<string, string> };
@@ -622,9 +641,7 @@ export function dispatchTestMode(
         if (!loc.platform_links) loc.platform_links = {};
         for (const [k, raw] of Object.entries(p.links || {})) {
           const pid = String(k).trim();
-          if (!pid || pid === "google") {
-            throw new Error("Use the Google field for Google, not platform links.");
-          }
+          if (!pid) continue;
           const u = (raw || "").trim();
           if (!u) {
             delete loc.platform_links[pid];
@@ -644,39 +661,92 @@ export function dispatchTestMode(
       return { location_id: lid, platform_links: { ...plOut } };
     }
   }
-  if (path === "/api/reviewloop/me/locations" && method === "POST") {
+  // PATCH /api/goodword/me/locations/:id — rename, set default, reorder.
+  // Mirrors `patchMyLocation` in the API layer so the in-browser demo flow
+  // (Try mode) doesn't dead-end when a user edits a store.
+  {
+    const mPatch = path.match(/^\/api\/goodword\/me\/locations\/([^/]+)$/);
+    if (mPatch && method === "PATCH") {
+      const lid = mPatch[1]!;
+      const p = readBody(body) as {
+        name?: string;
+        sort_index?: number;
+        is_default?: boolean;
+      };
+      let updated: BusinessLocation | null = null;
+      mutate((s) => {
+        const loc = s.locations?.find((l) => l.id === lid);
+        if (!loc) throw new Error("Store not found");
+        if (typeof p.name === "string") {
+          const n = p.name.trim();
+          if (!n) throw new Error("Store name is required");
+          loc.name = n;
+        }
+        if (typeof p.sort_index === "number" && Number.isFinite(p.sort_index)) {
+          loc.sort_index = p.sort_index;
+        }
+        if (p.is_default === true) {
+          for (const l of s.locations ?? []) l.is_default = false;
+          loc.is_default = true;
+          s.default_location_id = loc.id;
+        }
+        loc.updated_at = nowIso();
+        updated = loc;
+      });
+      return {
+        location: { ...updated!, platform_links: updated!.platform_links || {} },
+      };
+    }
+  }
+
+  // DELETE /api/goodword/me/locations/:id — remove a store. If it was the
+  // default, promote the next remaining store (or null) so the demo doesn't
+  // dangle on a stale default_location_id.
+  {
+    const mDel = path.match(/^\/api\/goodword\/me\/locations\/([^/]+)$/);
+    if (mDel && method === "DELETE") {
+      const lid = mDel[1]!;
+      mutate((s) => {
+        const before = s.locations ?? [];
+        const target = before.find((l) => l.id === lid);
+        if (!target) throw new Error("Store not found");
+        s.locations = before.filter((l) => l.id !== lid);
+        if (s.default_location_id === lid) {
+          const fallback = s.locations[0] ?? null;
+          if (fallback) {
+            fallback.is_default = true;
+            s.default_location_id = fallback.id;
+          } else {
+            s.default_location_id = null;
+          }
+        }
+        s.business = { ...s.business, updated_at: nowIso() };
+      });
+      return { ok: true };
+    }
+  }
+
+  if (path === "/api/goodword/me/locations" && method === "POST") {
     const p = readBody(body) as {
       name?: string;
-      gmb_review_url?: string;
       platform_links?: Record<string, string>;
       is_default?: boolean;
       sort_index?: number;
     };
     const name = (p.name || "").trim();
     if (!name) throw new Error("Store name is required");
-    const gmb = (p.gmb_review_url || "").trim();
-    if (gmb) {
-      try {
-        const h = new URL(gmb);
-        if (!h.protocol.startsWith("http")) throw new Error("Invalid URL");
-      } catch {
-        throw new Error("If you add a link, it must be a full http(s) URL, or leave the field empty");
-      }
-    }
     const fromPl: Record<string, string> = {};
     if (p.platform_links) {
       for (const [k, v] of Object.entries(p.platform_links)) {
         const pid = String(k).trim();
-        if (!pid || pid === "google") {
-          throw new Error("Use the Google field for Google when creating a store, not platform_links");
-        }
+        if (!pid) continue;
         const u = String(v).trim();
         if (!u) continue;
-        if (!u.startsWith("https://")) throw new Error("Yelp and other non-Google links must be https:// URLs");
+        if (!u.startsWith("https://")) throw new Error("Platform links must be https:// URLs");
         try {
           void new URL(u);
         } catch {
-          throw new Error('If you add a link, it must be a full https URL, or choose "No first link"');
+          throw new Error("Use a full https URL");
         }
         fromPl[pid] = u;
       }
@@ -694,40 +764,69 @@ export function dispatchTestMode(
         id: newId(),
         business_id: s.business.id,
         name,
-        gmb_review_url: gmb,
         sort_index: p.sort_index ?? 0,
         is_default: makeDef,
         created_at: t,
         updated_at: t,
-        platform_links: { ...fromPl } as Record<string, string>,
+        platform_links: { ...fromPl },
       };
       s.locations = [...s.locations, created];
       if (makeDef) {
-        s.business = {
-          ...s.business,
-          default_location_id: created.id,
-          gmb_review_url: (gmb || s.business.gmb_review_url) as string,
-          updated_at: t,
-        };
+        s.default_location_id = created.id;
+        s.business = { ...s.business, updated_at: t };
       }
     });
     return { location: { ...created!, platform_links: created!.platform_links || {} } };
   }
-  if (path === "/api/reviewloop/me/bootstrap" && method === "GET") {
+  if (path === "/api/goodword/me/bootstrap" && method === "GET") {
     processDueSends();
     const s = getTestState();
     const tzn = (s.business?.timezone || "UTC").trim() || "UTC";
     const withLinks = (s.locations ?? []).map((loc) => ({ ...loc, platform_links: loc.platform_links || {} }));
     return {
       business: { ...s.business },
-      config: dispatchTestMode("/api/reviewloop/config", "GET", null, null, false) as Record<string, unknown>,
+      config: dispatchTestMode("/api/goodword/config", "GET", null, null, false) as Record<string, unknown>,
       credits: { ...s.credits, ledger: [...s.credits.ledger] },
-      locations: { locations: withLinks, default_location_id: s.business.default_location_id ?? null },
+      locations: { locations: withLinks, default_location_id: s.default_location_id ?? null },
       ingest_presets: computeIngestPresetsForZone(tzn),
       display_timezone: tzn,
+      credit_rates: {
+        country_code: (s.business?.country_code || "US").toUpperCase(),
+        email_credits: EMAIL_CREDIT,
+        sms_credits_per_segment: SMS_CREDIT,
+        source: "default",
+        notes: null,
+      },
+      // Test mode pretends the user is on Pro so every screen renders without
+      // Free-tier locks getting in the way of demos.
+      usage: {
+        plan: s.subscriptionPro ? "pro" : "free",
+        limits: s.subscriptionPro
+          ? {
+              campaigns_per_month: null,
+              locations: null,
+              credits_purchase_per_month: null,
+            }
+          : {
+              campaigns_per_month: 5,
+              locations: 1,
+              credits_purchase_per_month: 100,
+            },
+        used: {
+          campaigns_this_month: (s.campaigns || []).length,
+          locations_total: (s.locations || []).length,
+          credits_purchased_this_month: Math.max(
+            0,
+            (s.credits.ledger || [])
+              .filter((row) => row.reason === "topup" && (row.delta ?? 0) > 0)
+              .reduce((acc, row) => acc + (row.delta ?? 0), 0),
+          ),
+        },
+        pro_monthly_credits: 100,
+      },
     } as const;
   }
-  if (path === "/api/reviewloop/me/business" && method === "POST") {
+  if (path === "/api/goodword/me/business" && method === "POST") {
     const p = readBody(body) as Record<string, unknown>;
     let out: Business;
     mutate((s) => {
@@ -736,7 +835,9 @@ export function dispatchTestMode(
     });
     return { business: { ...out! } };
   }
-  if (path === "/api/reviewloop/contacts/lookup" && method === "POST") {
+
+  // contacts
+  if (path === "/api/goodword/contacts/lookup" && method === "POST") {
     processDueSends();
     const p = readBody(body) as { ids?: unknown[] };
     const want = new Set(
@@ -748,10 +849,10 @@ export function dispatchTestMode(
     const out = getTestState().contacts.filter((c) => want.has(c.id));
     return { contacts: out };
   }
-  if (path === "/api/reviewloop/contacts/ingest-presets" && method === "GET") {
+  if (path === "/api/goodword/contacts/ingest-presets" && method === "GET") {
     return computeIngestPresetsForZone((getTestState().business?.timezone || "UTC").trim() || "UTC");
   }
-  if (path === "/api/reviewloop/contacts" && method === "GET") {
+  if (path === "/api/goodword/contacts" && method === "GET") {
     processDueSends();
     const textQ = (q.get("q") || "").trim().toLowerCase();
     const fromS = q.get("created_from") || "";
@@ -762,11 +863,19 @@ export function dispatchTestMode(
     const tz = (getTestState().business?.timezone || "UTC").trim() || "UTC";
     let list = [...getTestState().contacts].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
     if (textQ) {
+      // Mirror the server's search: name / email / external_ref / phone, with
+      // a digit-only fallback for phone so "447700 900 123" still matches the
+      // stored "+447700900123".
+      const digitsOnly = textQ.replace(/\D+/g, "");
       list = list.filter((c) => {
         const n = (c.name || "").toLowerCase();
         const e = (c.email || "").toLowerCase();
         const r = (c.external_ref || "").toLowerCase();
-        return n.includes(textQ) || e.includes(textQ) || r.includes(textQ);
+        const p = (c.phone_e164 || "").toLowerCase();
+        if (n.includes(textQ) || e.includes(textQ) || r.includes(textQ)) return true;
+        if (p.includes(textQ)) return true;
+        if (digitsOnly && digitsOnly !== textQ && p.includes(digitsOnly)) return true;
+        return false;
       });
     }
     if (fromS && toS) {
@@ -795,7 +904,7 @@ export function dispatchTestMode(
     const has_next = off + slice.length < total;
     return { contacts: slice, total, page, page_size: pageSize, has_next };
   }
-  if (path === "/api/reviewloop/contacts" && method === "POST") {
+  if (path === "/api/goodword/contacts" && method === "POST") {
     const p = readBody(body) as Record<string, unknown>;
     if (!p.consent) throw new Error("You must confirm the customer has consented to receive a review request from your business.");
     const em = normEmail(p.email as string);
@@ -804,40 +913,60 @@ export function dispatchTestMode(
     const sendNow = p.send_now !== false;
     const locId =
       p.location_id != null && String(p.location_id).trim() ? String(p.location_id).trim() : null;
-    const out: { c: Contact; m: unknown | null } = { c: {} as Contact, m: null };
+    const out: { c: Contact; m: unknown | null; matchedExisting: boolean } = {
+      c: {} as Contact,
+      m: null,
+      matchedExisting: false,
+    };
     mutate((s) => {
-      const contact: Contact = {
-        id: newId(),
-        business_id: s.business.id,
-        name: (p.name as string) || null,
-        email: em,
-        phone_e164: ph,
-        source: "manual",
-        consent_attested_at: nowIso(),
-        unsubscribed_at: null,
-        last_message_at: null,
-        external_ref: p.external_ref ? String(p.external_ref) : null,
-        created_at: nowIso(),
-        location_id: locId,
-      };
-      s.contacts = [contact, ...s.contacts];
+      // Dedup by email or phone within this business (mirrors the server's
+      // upsert_contact + the DB's unique indexes). Manually adding the same
+      // person twice updates the existing record instead of creating a copy.
+      const existing = findContactByEmailOrPhone(s.contacts, s.business.id, em, ph);
+      let contact: Contact;
+      if (existing) {
+        existing.name = (p.name as string) || existing.name;
+        if (em) existing.email = em;
+        if (ph) existing.phone_e164 = ph;
+        existing.consent_attested_at = nowIso();
+        if (p.external_ref) existing.external_ref = String(p.external_ref);
+        if (locId !== null) existing.location_id = locId;
+        contact = existing;
+        out.matchedExisting = true;
+      } else {
+        contact = {
+          id: newId(),
+          business_id: s.business.id,
+          name: (p.name as string) || null,
+          email: em,
+          phone_e164: ph,
+          source: "manual",
+          consent_attested_at: nowIso(),
+          unsubscribed_at: null,
+          last_message_at: null,
+          external_ref: p.external_ref ? String(p.external_ref) : null,
+          created_at: nowIso(),
+          location_id: locId,
+        };
+        s.contacts = [contact, ...s.contacts];
+      }
       out.c = contact;
       if (sendNow) {
         const b = s.business;
         const ch = p.channel
           ? (p.channel as "email" | "sms")
           : resolveChannel(b, contact, "auto");
-        const camId =
+        const templId =
           ch === "email"
-            ? (p.email_campaign_id as string | undefined) || null
-            : (p.sms_campaign_id as string | undefined) || null;
-        const r = enqueue(s, contact, ch, camId);
+            ? (p.email_template_id as string | undefined) || null
+            : (p.sms_template_id as string | undefined) || null;
+        const r = enqueue(s, contact, ch, templId);
         out.m = { ...r.message, routing_token: r.routing_token, routing_link: { token: r.routing_token } };
       }
     });
-    return { contact: out.c, message: out.m };
+    return { contact: out.c, message: out.m, matched_existing: out.matchedExisting };
   }
-  if (path === "/api/reviewloop/contacts/unsubscribe" && method === "POST") {
+  if (path === "/api/goodword/contacts/unsubscribe" && method === "POST") {
     const p = readBody(body) as { contact_id: string };
     mutate((s) => {
       const c = s.contacts.find((x) => x.id === p.contact_id);
@@ -848,7 +977,7 @@ export function dispatchTestMode(
     });
     return { ok: true };
   }
-  if (path === "/api/reviewloop/contacts/resubscribe" && method === "POST") {
+  if (path === "/api/goodword/contacts/resubscribe" && method === "POST") {
     const p = readBody(body) as { contact_id: string };
     const t = nowIso();
     mutate((s) => {
@@ -860,10 +989,92 @@ export function dispatchTestMode(
     });
     return { ok: true };
   }
+  // PATCH /api/goodword/contacts/:id — edit name/email/phone/store on an
+  // existing contact. Required for parity with the real backend's
+  // `updateContact`; without this the demo dies on the first edit.
   {
-    const ms = path.match(/\/api\/reviewloop\/contacts\/([^/]+)\/send$/);
+    const mPatch = path.match(/^\/api\/goodword\/contacts\/([^/]+)$/);
+    if (mPatch && method === "PATCH") {
+      const cid = mPatch[1]!;
+      const p = readBody(body) as {
+        name?: string | null;
+        email?: string | null;
+        phone?: string | null;
+        external_ref?: string | null;
+        location_id?: string | null;
+      };
+      let out: Contact | null = null;
+      mutate((s) => {
+        const c = s.contacts.find((x) => x.id === cid);
+        if (!c) throw new Error("Contact not found");
+
+        if ("name" in p) c.name = (p.name ?? "").trim() || null;
+        if ("external_ref" in p) c.external_ref = (p.external_ref ?? "").trim() || null;
+
+        if ("email" in p) {
+          const raw = (p.email ?? "").trim();
+          if (!raw) {
+            c.email = null;
+          } else {
+            const ne = raw.toLowerCase();
+            // Mirror the backend's per-business email uniqueness check.
+            const dup = s.contacts.find((x) => x.id !== cid && (x.email ?? "").toLowerCase() === ne);
+            if (dup) throw new Error("Another contact already uses that email.");
+            c.email = ne;
+          }
+        }
+        if ("phone" in p) {
+          const raw = (p.phone ?? "").trim();
+          if (!raw) {
+            c.phone_e164 = null;
+          } else {
+            if (!raw.startsWith("+")) {
+              throw new Error("Enter phone in E.164 format starting with + and country code.");
+            }
+            const dup = s.contacts.find((x) => x.id !== cid && x.phone_e164 === raw);
+            if (dup) throw new Error("Another contact already uses that phone number.");
+            c.phone_e164 = raw;
+          }
+        }
+        if ("location_id" in p) {
+          const lid = (p.location_id ?? "") as string | null;
+          if (!lid) {
+            c.location_id = null;
+          } else {
+            if (!s.locations?.some((l) => l.id === lid)) throw new Error("Store not found");
+            c.location_id = lid;
+          }
+        }
+        if (!c.email && !c.phone_e164) {
+          throw new Error("A contact needs at least one of email or phone.");
+        }
+        out = c;
+      });
+      return { contact: { ...out! } };
+    }
+  }
+
+  // DELETE /api/goodword/contacts/:id — remove a contact (mirrors backend).
+  {
+    const mDel = path.match(/^\/api\/goodword\/contacts\/([^/]+)$/);
+    if (mDel && method === "DELETE") {
+      const cid = mDel[1]!;
+      mutate((s) => {
+        s.contacts = s.contacts.filter((c) => c.id !== cid);
+        // Drop any scheduled messages so the dispatcher loop doesn't strand
+        // them after the contact is gone.
+        s.messages = s.messages.filter(
+          (m) => m.contact_id !== cid || m.status !== "scheduled",
+        );
+      });
+      return { ok: true };
+    }
+  }
+
+  {
+    const ms = path.match(/\/api\/goodword\/contacts\/([^/]+)\/send$/);
     if (ms && method === "POST") {
-      const p = readBody(body) as { channel?: "email" | "sms"; campaign_id?: string };
+      const p = readBody(body) as { channel?: "email" | "sms"; template_id?: string };
       const cid = ms[1]!;
       const res: { message: unknown } = { message: null as unknown };
       mutate((s) => {
@@ -873,18 +1084,18 @@ export function dispatchTestMode(
         const ch = p.channel
           ? resolveChannel(b, c, p.channel)
           : resolveChannel(b, c, "auto");
-        const r = enqueue(s, c, ch, p.campaign_id);
+        const r = enqueue(s, c, ch, p.template_id);
         res.message = { ...r.message, routing_token: r.routing_token, routing_link: { token: r.routing_token } };
       });
       return { message: res.message };
     }
   }
-  if (path === "/api/reviewloop/contacts/bulk-send" && method === "POST") {
+  if (path === "/api/goodword/contacts/bulk-send" && method === "POST") {
     const p = readBody(body) as {
       contact_ids: string[];
       channel?: "email" | "sms";
-      email_campaign_id?: string;
-      sms_campaign_id?: string;
+      email_template_id?: string;
+      sms_template_id?: string;
     };
     const res: { scheduled: number; failed: { contact_id: string; error: string }[] } = { scheduled: 0, failed: [] };
     mutate((s) => {
@@ -902,8 +1113,8 @@ export function dispatchTestMode(
           const ch = p.channel
             ? resolveChannel(s.business, c, p.channel)
             : resolveChannel(s.business, c, "auto");
-          const camId = ch === "email" ? p.email_campaign_id : p.sms_campaign_id;
-          enqueue(s, c, ch, camId);
+          const templId = ch === "email" ? p.email_template_id : p.sms_template_id;
+          enqueue(s, c, ch, templId);
           res.scheduled += 1;
         } catch (e) {
           res.failed.push({ contact_id: cid, error: e instanceof Error ? e.message : "err" });
@@ -912,331 +1123,360 @@ export function dispatchTestMode(
     });
     return res;
   }
-  if (path === "/api/reviewloop/contacts/csv-upload" && method === "POST") {
+  if (path === "/api/goodword/contacts/csv-upload" && method === "POST") {
     throw new Error("Use testModePostCsv in api.ts (multipart) — this path is only for JSON dispatch");
   }
-  if (path.match(/\/api\/reviewloop\/contacts\/[^/]+$/) && method === "DELETE") {
-    const m = path.match(/\/api\/reviewloop\/contacts\/([^/]+)$/);
+  if (path.match(/\/api\/goodword\/contacts\/[^/]+$/) && method === "DELETE") {
+    const m = path.match(/\/api\/goodword\/contacts\/([^/]+)$/);
     const id = m?.[1];
     mutate((s) => {
       s.contacts = s.contacts.filter((c) => c.id !== id);
     });
     return { ok: true };
   }
-  if (path === "/api/reviewloop/campaigns" && method === "GET") {
-    return { campaigns: getTestState().campaigns };
+
+  // templates CRUD
+  if (path === "/api/goodword/templates" && method === "GET") {
+    return { templates: getTestState().templates };
   }
-  if (path === "/api/reviewloop/campaigns" && method === "POST") {
-    const p = readBody(body) as Record<string, unknown>;
-    const locRaw = p.location_id;
-    const location_id =
-      locRaw === null || locRaw === undefined || locRaw === ""
-        ? null
-        : (typeof locRaw === "string" || typeof locRaw === "number" ? String(locRaw) : null);
-    const camp = {
-      id: newId(),
-      business_id: getTestState().business.id,
-      name: p.name,
-      channel: p.channel,
-      template_subject: p.channel === "sms" ? null : p.template_subject,
-      template_body: p.template_body,
-      delay_minutes: Number(p.delay_minutes) || 60,
-      is_default: Boolean(p.is_default),
-      location_id,
-      created_at: nowIso(),
-      updated_at: nowIso(),
-    } as any;
-    mutate((s) => s.campaigns.push(camp));
-    return { campaign: camp };
-  }
-  if (path.match(/\/api\/reviewloop\/campaigns\/[^/]+$/) && method === "PUT") {
-    const id = path.split("/").pop()!;
-    const p = readBody(body) as Record<string, unknown>;
-    const locRaw = p.location_id;
-    const location_id =
-      "location_id" in p
-        ? locRaw === null || locRaw === undefined || locRaw === ""
-          ? null
-          : String(locRaw)
-        : undefined;
+  if (path === "/api/goodword/templates" && method === "POST") {
+    const p = readBody(body) as { name?: string; channel?: string; subject?: string | null; body?: string; is_default?: boolean };
+    const name = (p.name || "").trim();
+    if (!name) throw new Error("Template name is required");
+    const channel = p.channel === "sms" ? "sms" : ("email" as "email" | "sms");
+    const bodyText = (p.body || "").trim();
+    if (!bodyText) throw new Error("Template body is required");
+    if (channel === "sms" && !/{business}/.test(bodyText)) {
+      throw new Error("SMS templates must include {business} so recipients know who is contacting them. This is required for telecom compliance.");
+    }
+    let created: Template;
     mutate((s) => {
-      const i = s.campaigns.findIndex((c) => c.id === id);
-      if (i < 0) return;
-      const next = { ...s.campaigns[i], ...p, updated_at: nowIso() } as any;
-      if (location_id !== undefined) next.location_id = location_id;
-      s.campaigns[i] = next;
+      const t = nowIso();
+      const makeDefault = Boolean(p.is_default);
+      if (makeDefault) {
+        for (const tmpl of s.templates) {
+          if (tmpl.channel === channel) tmpl.is_default = false;
+        }
+      }
+      created = {
+        id: newId(),
+        business_id: s.business.id,
+        name,
+        channel,
+        subject: channel === "email" ? (p.subject || null) : null,
+        body: bodyText,
+        is_default: makeDefault,
+        created_at: t,
+        updated_at: t,
+      };
+      s.templates.push(created);
     });
-    return { campaign: getTestState().campaigns.find((c) => c.id === id)! };
-  }
-  if (path.match(/\/api\/reviewloop\/campaigns\/[^/]+$/) && method === "DELETE") {
-    const id = path.split("/").pop()!;
-    mutate((s) => (s.campaigns = s.campaigns.filter((c) => c.id !== id)));
-    return { ok: true };
+    return { template: created! };
   }
   {
-    if (path === "/api/reviewloop/sequences" && method === "GET") {
-      const page = Math.max(1, parseInt(q.get("page") || "1", 10) || 1);
-      const pageSize = Math.min(2000, Math.max(1, parseInt(q.get("page_size") || "20", 10) || 20));
-      const nameQ = (q.get("q") || "").trim().toLowerCase();
-      const st = (q.get("status") || "all").trim().toLowerCase();
-      const fromD = (q.get("from") || "").trim();
-      const toD = (q.get("to") || "").trim();
-      const rows0 = mockSequenceStore.map((r) => {
-        const activeEnrollments = activeEnrollmentCount(r.id);
-        const listStatus = r.is_active
-          ? "running"
-          : activeEnrollments > 0
-            ? "paused"
-            : "completed";
-        return {
-          id: r.id,
-          name: r.name,
-          is_active: r.is_active,
-          list_status: listStatus,
-          step_count: r.steps.length,
-          active_enrollments: activeEnrollments,
-          location_id: r.location_id,
-          review_link_style: r.review_link_style,
-          created_at: r.created_at,
-          updated_at: r.updated_at,
+    const tMatch = path.match(/^\/api\/goodword\/templates\/([^/]+)$/);
+    if (tMatch && method === "PUT") {
+      const id = tMatch[1]!;
+      const p = readBody(body) as { name?: string; subject?: string | null; body?: string; is_default?: boolean };
+      let updated: Template | undefined;
+      mutate((s) => {
+        const i = s.templates.findIndex((t) => t.id === id);
+        if (i < 0) throw new Error("Template not found");
+        const existing = s.templates[i]!;
+        const newBody = p.body !== undefined ? (p.body || "").trim() : existing.body;
+        if (existing.channel === "sms" && !/{business}/.test(newBody)) {
+          throw new Error("SMS templates must include {business} so recipients know who is contacting them. This is required for telecom compliance.");
+        }
+        if (p.is_default && !existing.is_default) {
+          for (const tmpl of s.templates) {
+            if (tmpl.channel === existing.channel) tmpl.is_default = false;
+          }
+        }
+        const next: Template = {
+          ...existing,
+          ...(p.name !== undefined ? { name: (p.name || "").trim() } : {}),
+          ...(p.subject !== undefined ? { subject: existing.channel === "email" ? p.subject : null } : {}),
+          ...(p.body !== undefined ? { body: (p.body || "").trim() } : {}),
+          ...(p.is_default !== undefined ? { is_default: Boolean(p.is_default) } : {}),
+          updated_at: nowIso(),
         };
+        s.templates[i] = next;
+        updated = next;
       });
-      let rows = nameQ
-        ? rows0.filter((x) => (x.name || "").toLowerCase().includes(nameQ))
-        : rows0.slice();
-      if (fromD) {
-        const lo = fromD.length >= 8 ? fromD.slice(0, 10) : fromD;
-        rows = rows.filter((x) => (x.created_at || "").slice(0, 10) >= lo);
-      }
-      if (toD) {
-        const hi = toD.length >= 8 ? toD.slice(0, 10) : toD;
-        rows = rows.filter((x) => (x.created_at || "").slice(0, 10) <= hi);
-      }
-      if (st === "running") {
-        rows = rows.filter((x) => x.is_active);
-      } else if (st === "paused") {
-        rows = rows.filter((x) => !x.is_active && (x as { list_status: string }).list_status === "paused");
-      } else if (st === "completed") {
-        rows = rows.filter((x) => !x.is_active && (x as { list_status: string }).list_status === "completed");
-      }
-      const total = rows.length;
-      const start = (page - 1) * pageSize;
-      const pageRows = rows.slice(start, start + pageSize);
-      return { sequences: pageRows, total, page, page_size: pageSize };
+      return { template: updated! };
     }
-    if (path === "/api/reviewloop/sequences" && method === "POST") {
-      const p = readBody(body) as {
-        name?: string;
-        is_active?: boolean;
-        location_id?: string | null;
-        review_link_style?: string;
-        steps?: { campaign_id: string; delay_after_previous_minutes: number }[];
-      };
-      const stepsIn = p.steps && p.steps.length ? p.steps : [{ campaign_id: "", delay_after_previous_minutes: 60 }];
+    if (tMatch && method === "DELETE") {
+      const id = tMatch[1]!;
+      mutate((s) => {
+        s.templates = s.templates.filter((t) => t.id !== id);
+      });
+      return { ok: true };
+    }
+  }
+
+  // campaigns
+  if (path === "/api/goodword/campaigns" && method === "GET") {
+    const page = Math.max(1, parseInt(q.get("page") || "1", 10) || 1);
+    const pageSize = Math.min(200, Math.max(1, parseInt(q.get("page_size") || "20", 10) || 20));
+    const nameQ = (q.get("q") || "").trim().toLowerCase();
+    const statusFilter = (q.get("status") || "").trim().toLowerCase();
+    const fromD = (q.get("from") || "").trim();
+    const toD = (q.get("to") || "").trim();
+    let rows: Campaign[] = [...getTestState().campaigns].map((c) => ({
+      ...c,
+      step_count: c.steps?.length ?? c.step_count ?? 0,
+      recipient_count: mockCampaignRecipients.filter((r) => r.campaign_id === c.id).length,
+    }));
+    if (nameQ) rows = rows.filter((c) => (c.name || "").toLowerCase().includes(nameQ));
+    if (statusFilter && statusFilter !== "all") rows = rows.filter((c) => c.status === statusFilter);
+    if (fromD) rows = rows.filter((c) => (c.created_at || "").slice(0, 10) >= fromD.slice(0, 10));
+    if (toD) rows = rows.filter((c) => (c.created_at || "").slice(0, 10) <= toD.slice(0, 10));
+    rows = rows.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    const total = rows.length;
+    const start = (page - 1) * pageSize;
+    return { campaigns: rows.slice(start, start + pageSize), total, page, page_size: pageSize };
+  }
+  if (path === "/api/goodword/campaigns" && method === "POST") {
+    const p = readBody(body) as {
+      name?: string;
+      location_id?: string | null;
+      steps?: { template_id: string; delay_minutes: number }[];
+      contact_ids?: string[];
+      scheduled_at?: string | null;
+    };
+    const name = (p.name || "").trim();
+    if (!name) throw new Error("Campaign name is required");
+    if (!p.contact_ids?.length) {
+      throw new Error("Add at least one recipient before creating the campaign.");
+    }
+    const stepsIn = p.steps || [];
+    // Mirror the server: future scheduled_at → "scheduled", otherwise "running"
+    // with recipients flipped active. No more "draft" intermediate state.
+    const scheduledAt =
+      p.scheduled_at && new Date(p.scheduled_at).getTime() > Date.now()
+        ? p.scheduled_at
+        : null;
+    const initialStatus: Campaign["status"] = scheduledAt ? "scheduled" : "running";
+    let created: Campaign;
+    mutate((s) => {
       const id = newId();
-      const now = nowIso();
-      const steps = stepsIn.map((s, i) => ({ ...s, step_index: i }));
-      const rs = (p.review_link_style || "hosted") as string;
-      const rstyle: MockSequenceRow["review_link_style"] =
-        rs === "direct_google" || rs === "direct_yelp" ? (rs as MockSequenceRow["review_link_style"]) : "hosted";
-      const row: MockSequenceRow = {
+      const t = nowIso();
+      const steps = stepsIn.map((step, i) => ({
+        id: newId(),
+        campaign_id: id,
+        step_index: i,
+        template_id: step.template_id,
+        delay_minutes: Number(step.delay_minutes) || 60,
+      }));
+      created = {
         id,
-        name: String(p.name || "Campaign").trim() || "Campaign",
-        is_active: p.is_active !== false,
-        location_id: p.location_id && String(p.location_id).trim() ? String(p.location_id).trim() : null,
-        review_link_style: rstyle,
+        business_id: s.business.id,
+        name,
+        location_id: p.location_id ?? null,
+        status: initialStatus,
+        scheduled_at: scheduledAt,
+        started_at: initialStatus === "running" ? t : null,
+        total_paused_seconds: 0,
+        step_count: steps.length,
+        recipient_count: p.contact_ids!.length,
         steps,
-        created_at: now,
-        updated_at: now,
+        created_at: t,
+        updated_at: t,
       };
-      mockSequenceStore.push(row);
-      return mockSequenceToDetail(row);
-    }
-    {
-      const statsM = path.match(/^\/api\/reviewloop\/sequences\/([^/]+)\/stats$/);
-      if (statsM && method === "GET") {
-        const sid = statsM[1]!;
-        const r = mockSequenceStore.find((x) => x.id === sid);
-        const ev = enrollmentStatsAggregate(sid);
-        return {
-          sequence_id: sid,
-          step_count: r ? r.steps.length : 0,
-          enrollments: {
-            active: ev.active,
-            completed: ev.completed,
-            stopped_replied: ev.stopped_replied,
-            cancelled: ev.cancelled,
-            total: ev.total,
-          },
-          messages_sent: 0,
-          step_sends_count: 0,
-          finished_all_steps_count: ev.completed,
-          scheduled_messages_pending: 0,
-        };
-      }
-      if (path.match(/^\/api\/reviewloop\/sequences\/([^/]+)\/enrollments$/) && method === "GET") {
-        const em = path.match(/^\/api\/reviewloop\/sequences\/([^/]+)\/enrollments$/);
-        const sequenceId = em?.[1] || "";
-        const limit = Math.min(500, Math.max(1, parseInt(q.get("limit") || "200", 10) || 200));
-        const s = getTestState();
-        const seq = mockSequenceStore.find((x) => x.id === sequenceId);
-        const sc = seq ? seq.steps.length : 0;
-        const nextAt = (stepIdx: number) => ({
-          send_at: new Date(Date.now() + 3600e3).toISOString(),
-          step_index: stepIdx,
+      s.campaigns.push(created);
+      const recipStatus = initialStatus === "running" ? "active" : "pending";
+      for (const cid of p.contact_ids!) {
+        mockCampaignRecipients.push({
+          recipient_id: newId(),
+          campaign_id: id,
+          contact_id: cid,
+          status: recipStatus,
+          current_step: 0,
+          enrolled_at: t,
+          updated_at: t,
         });
-        const rows = mockSequenceEnrollments
-          .filter((e) => e.sequence_id === sequenceId)
-          .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
-          .slice(0, limit)
-          .map((e) => {
-            const c = s.contacts.find((x) => x.id === e.contact_id);
-            if (!c) return null;
-            return {
-              enrollment_id: e.enrollment_id,
-              contact: {
-                id: c.id,
-                name: c.name || "—",
-                email: c.email,
-                phone_e164: c.phone_e164,
-              },
-              status: e.status,
-              created_at: e.created_at,
-              updated_at: e.updated_at,
-              step_count: sc,
-              last_sent_step_index: null,
-              messages_sent: 0,
-              next_scheduled: e.status === "active" && sc > 0 ? nextAt(0) : null,
-            };
-          })
-          .filter((x) => x != null);
-        return { enrollments: rows };
       }
-      {
-        const stopAllM = path.match(/^\/api\/reviewloop\/sequences\/([^/]+)\/stop-active$/);
-        if (stopAllM && method === "POST") {
-          const sequenceId = stopAllM[1]!;
-          const t = nowIso();
-          let stopped = 0;
-          for (const e of mockSequenceEnrollments) {
-            if (e.sequence_id === sequenceId && e.status === "active") {
-              e.status = "cancelled";
-              e.updated_at = t;
-              stopped += 1;
-            }
+    });
+    return { campaign: created! };
+  }
+  {
+    // campaign sub-routes — must be matched before the bare /{id} route
+    const campActivate = path.match(/^\/api\/goodword\/campaigns\/([^/]+)\/activate$/);
+    if (campActivate && method === "POST") {
+      const id = campActivate[1]!;
+      mutate((s) => {
+        const c = s.campaigns.find((x) => x.id === id);
+        if (!c) throw new Error("Campaign not found");
+        c.status = "running";
+        c.started_at = nowIso();
+        c.updated_at = nowIso();
+        for (const r of mockCampaignRecipients) {
+          if (r.campaign_id === id && r.status === "pending") {
+            r.status = "active";
+            r.updated_at = nowIso();
           }
-          return { ok: true, stopped };
         }
-        const stopOneM = path.match(
-          /^\/api\/reviewloop\/sequences\/([^/]+)\/enrollments\/([^/]+)\/stop$/,
-        );
-        if (stopOneM && method === "POST") {
-          const sequenceId = stopOneM[1]!;
-          const enrollmentId = stopOneM[2]!;
-          const row = mockSequenceEnrollments.find(
-            (e) => e.sequence_id === sequenceId && e.enrollment_id === enrollmentId,
-          );
-          if (row) {
-            row.status = "cancelled";
-            row.updated_at = nowIso();
-          }
-          return { ok: true, stopped: true };
-        }
-        const stopSeq = path.match(/^\/api\/reviewloop\/sequences\/([^/]+)\/stop$/);
-        if (stopSeq && method === "POST") {
-          const r = mockSequenceStore.find((x) => x.id === stopSeq[1]);
-          if (!r) throw new Error("Campaign not found");
-          r.is_active = false;
-          r.updated_at = nowIso();
-          return { ok: true, is_active: false };
-        }
-        const resumeSeq = path.match(/^\/api\/reviewloop\/sequences\/([^/]+)\/resume$/);
-        if (resumeSeq && method === "POST") {
-          const r = mockSequenceStore.find((x) => x.id === resumeSeq[1]);
-          if (!r) throw new Error("Campaign not found");
-          r.is_active = true;
-          r.updated_at = nowIso();
-          return { ok: true, is_active: true };
-        }
-      }
+      });
+      return { ok: true };
     }
-    const seqGet = path.match(/^\/api\/reviewloop\/sequences\/([^/]+)$/);
-    if (seqGet && method === "GET" && !path.includes("/enroll")) {
-      const r = mockSequenceStore.find((x) => x.id === seqGet[1]);
-      if (!r) throw new Error("Campaign not found");
-      return mockSequenceToDetail(r);
+    const campPause = path.match(/^\/api\/goodword\/campaigns\/([^/]+)\/pause$/);
+    if (campPause && method === "POST") {
+      const id = campPause[1]!;
+      mutate((s) => {
+        const c = s.campaigns.find((x) => x.id === id);
+        if (!c) throw new Error("Campaign not found");
+        c.status = "paused";
+        c.paused_at = nowIso();
+        c.updated_at = nowIso();
+      });
+      return { ok: true };
     }
-    if (seqGet && method === "PUT") {
-      const id = seqGet[1]!;
-      if (!mockSequenceStore.find((x) => x.id === id)) throw new Error("Campaign not found");
-      throw new Error(
-        "This campaign can't be edited after it's been created. You can open it, stop it, and use Analytics for history.",
-      );
+    const campResume = path.match(/^\/api\/goodword\/campaigns\/([^/]+)\/resume$/);
+    if (campResume && method === "POST") {
+      const id = campResume[1]!;
+      mutate((s) => {
+        const c = s.campaigns.find((x) => x.id === id);
+        if (!c) throw new Error("Campaign not found");
+        c.status = "running";
+        c.paused_at = null;
+        c.updated_at = nowIso();
+      });
+      return { ok: true };
     }
-    if (seqGet && method === "DELETE") {
-      const id = seqGet[1]!;
-      if (mockSequenceStore.findIndex((x) => x.id === id) < 0) throw new Error("Campaign not found");
-      throw new Error(
-        "Campaigns can't be deleted. Stop the campaign to prevent new people and new follow-up steps. Scheduled messages that are already queued will still send.",
-      );
-    }
-    const enrollM = path.match(/^\/api\/reviewloop\/sequences\/([^/]+)\/enroll$/);
-    if (enrollM && method === "POST") {
-      const sequenceId = enrollM[1]!;
-      const seq = mockSequenceStore.find((x) => x.id === sequenceId);
-      if (!seq) throw new Error("Campaign not found");
-      const p = readBody(body) as { contact_ids?: string[]; location_id?: string };
-      const rawIds = (p.contact_ids || []).map(String);
+    const campStats = path.match(/^\/api\/goodword\/campaigns\/([^/]+)\/stats$/);
+    if (campStats && method === "GET") {
+      const id = campStats[1]!;
       const s = getTestState();
-      const enrolled: string[] = [];
+      const c = s.campaigns.find((x) => x.id === id);
+      if (!c) throw new Error("Campaign not found");
+      const recips = mockCampaignRecipients.filter((r) => r.campaign_id === id);
+      return {
+        campaign_id: id,
+        status: c.status,
+        total_steps: c.steps?.length ?? c.step_count ?? 0,
+        total_recipients: recips.length,
+        active_recipients: recips.filter((r) => r.status === "active").length,
+        completed_recipients: recips.filter((r) => r.status === "completed").length,
+        active_seconds: 0,
+        next_scheduled_at: null,
+        messages_sent: 0,
+        messages_scheduled: 0,
+      };
+    }
+    const campRecips = path.match(/^\/api\/goodword\/campaigns\/([^/]+)\/recipients$/);
+    if (campRecips && method === "POST") {
+      const id = campRecips[1]!;
+      const p = readBody(body) as { contact_ids?: string[] };
+      const s = getTestState();
+      const c = s.campaigns.find((x) => x.id === id);
+      if (!c) throw new Error("Campaign not found");
+      const added: string[] = [];
       const errors: { contact_id: string; error: string }[] = [];
       const t = nowIso();
-      for (const cid of rawIds) {
-        const c = s.contacts.find((x) => x.id === cid);
-        if (!c) {
+      for (const cid of p.contact_ids || []) {
+        const contact = s.contacts.find((x) => x.id === cid);
+        if (!contact) {
           errors.push({ contact_id: cid, error: "Contact not found" });
           continue;
         }
-        const dup = mockSequenceEnrollments.some(
-          (e) => e.sequence_id === sequenceId && e.contact_id === cid && e.status === "active",
+        const dup = mockCampaignRecipients.some(
+          (r) => r.campaign_id === id && r.contact_id === cid && (r.status === "active" || r.status === "pending"),
         );
         if (dup) {
           errors.push({ contact_id: cid, error: "Already enrolled" });
           continue;
         }
-        mockSequenceEnrollments.push({
-          enrollment_id: newId(),
-          sequence_id: sequenceId,
+        mockCampaignRecipients.push({
+          recipient_id: newId(),
+          campaign_id: id,
           contact_id: cid,
-          status: "active",
-          created_at: t,
+          status: c.status === "running" ? "active" : "pending",
+          current_step: 0,
+          enrolled_at: t,
           updated_at: t,
         });
-        enrolled.push(cid);
+        added.push(cid);
       }
-      return { enrolled, errors };
+      mutate((s) => {
+        const camp = s.campaigns.find((x) => x.id === id);
+        if (camp && added.length > 0) {
+          camp.recipient_count = (camp.recipient_count ?? 0) + added.length;
+          camp.updated_at = nowIso();
+        }
+      });
+      return { added, errors };
+    }
+    if (campRecips && method === "GET") {
+      const id = campRecips[1]!;
+      const limit = Math.min(500, Math.max(1, parseInt(q.get("limit") || "200", 10) || 200));
+      const s = getTestState();
+      const c = s.campaigns.find((x) => x.id === id);
+      if (!c) throw new Error("Campaign not found");
+      const stepCount = c.steps?.length ?? c.step_count ?? 0;
+      const rows = mockCampaignRecipients
+        .filter((r) => r.campaign_id === id)
+        .sort((a, b) => (a.enrolled_at < b.enrolled_at ? 1 : -1))
+        .slice(0, limit)
+        .map((r) => {
+          const contact = s.contacts.find((x) => x.id === r.contact_id);
+          if (!contact) return null;
+          return {
+            recipient_id: r.recipient_id,
+            contact: { id: contact.id, name: contact.name, email: contact.email, phone_e164: contact.phone_e164 },
+            status: r.status,
+            current_step: r.current_step,
+            step_count: stepCount,
+            enrolled_at: r.enrolled_at,
+            started_at: r.status !== "pending" ? r.enrolled_at : null,
+            completed_at: r.status === "completed" ? r.updated_at : null,
+            next_scheduled:
+              r.status === "active" && stepCount > 0
+                ? { send_at: new Date(Date.now() + 3600e3).toISOString(), step_index: r.current_step }
+                : null,
+          };
+        })
+        .filter((x) => x !== null);
+      return { recipients: rows };
+    }
+    const campGet = path.match(/^\/api\/goodword\/campaigns\/([^/]+)$/);
+    if (campGet && method === "GET") {
+      const id = campGet[1]!;
+      const s = getTestState();
+      const c = s.campaigns.find((x) => x.id === id);
+      if (!c) throw new Error("Campaign not found");
+      const steps = (c.steps || []).map((step) => {
+        const templ = s.templates.find((t) => t.id === step.template_id);
+        return {
+          ...step,
+          goodword_templates: templ
+            ? { id: templ.id, name: templ.name, channel: templ.channel, subject: templ.subject }
+            : null,
+        };
+      });
+      return { campaign: { ...c, steps } };
     }
   }
-  if (path === "/api/reviewloop/me/dashboard" && method === "GET") {
+
+  if (path === "/api/goodword/me/dashboard" && method === "GET") {
     mutate((s) => {
       applyOutboundLogRetentionInPlace(s, OUTBOUND_LOG_RETENTION_DAYS);
     });
     const days = Number(q.get("days") || 30) || 30;
     return getDashboardForDays(days);
   }
-  if (path === "/api/reviewloop/me/feedback" && method === "GET") {
+  if (path === "/api/goodword/me/feedback" && method === "GET") {
     const s = getTestState();
     const onlyNeg = q.get("only_negative") === "true";
     const days = Number(q.get("days") || 90) || 90;
     const since = new Date(Date.now() - days * 864e5).toISOString();
     const raw = s.routingEvents.filter(
-      (e) => e.event === "submit_feedback" && e.created_at >= since
+      (e) => e.event === "submit_feedback" && e.created_at >= since,
     );
     const fb = raw.map((e) => ({ id: e.id, rating: e.rating, comment: e.comment, created_at: e.created_at }));
     const out = onlyNeg ? fb.filter((f) => (f.rating || 5) <= 3) : fb;
     return { feedback: out };
   }
-  if (path === "/api/reviewloop/me/messages" && method === "GET") {
+  if (path === "/api/goodword/me/messages" && method === "GET") {
     processDueSends();
     const listDays = Math.min(90, Math.max(1, Number(q.get("days")) || 30));
     mutate((s) => {
@@ -1255,13 +1495,13 @@ export function dispatchTestMode(
       });
     return { messages: rows };
   }
-  if (path === "/api/reviewloop/me/preview-routing" && method === "GET") {
+  if (path === "/api/goodword/me/preview-routing" && method === "GET") {
     const s = getTestState();
     const link = s.links.find((l) => new Date(l.expires_at) > new Date());
     if (!link) throw new Error("No review links yet.");
     return { token: link.token, url: linkUrl(link.token) };
   }
-  if (path === "/api/reviewloop/me/qr" && method === "GET") {
+  if (path === "/api/goodword/me/qr" && method === "GET") {
     const s = getTestState();
     const b = s.business;
     const lRaw = (q.get("l") || "").trim();
@@ -1274,8 +1514,8 @@ export function dispatchTestMode(
     return {
       url: u,
       location_id: lRaw || null,
-      png_endpoint: "/api/reviewloop/me/qr/png",
-      svg_endpoint: "/api/reviewloop/me/qr/svg",
+      png_endpoint: "/api/goodword/me/qr/png",
+      svg_endpoint: "/api/goodword/me/qr/svg",
       styles: [
         { id: "classic" as const, label: "Standard", description: "Test mode — all styles are generated locally." },
         { id: "dots" as const, label: "Dots", description: "Test mode" },
@@ -1283,10 +1523,10 @@ export function dispatchTestMode(
       ],
     };
   }
-  if (path === "/api/reviewloop/webhook-keys" && method === "GET") {
+  if (path === "/api/goodword/webhook-keys" && method === "GET") {
     return { keys: getTestState().webhooks };
   }
-  if (path === "/api/reviewloop/webhook-keys" && method === "POST") {
+  if (path === "/api/goodword/webhook-keys" && method === "POST") {
     const p = readBody(body) as { label?: string };
     const w = { id: newId(), key_prefix: "t_mk_" + newToken().slice(0, 4), label: p.label || "key", revoked_at: null, last_used_at: null, created_at: nowIso() };
     const raw = "rl_t_" + newToken() + newToken();
@@ -1297,7 +1537,7 @@ export function dispatchTestMode(
     return { key: raw, record: w };
   }
   {
-    const mw = path.match(/\/api\/reviewloop\/webhook-keys\/([^/]+)$/);
+    const mw = path.match(/\/api\/goodword\/webhook-keys\/([^/]+)$/);
     if (mw && method === "DELETE") {
       const wid = mw[1]!;
       mutate((s) => {
@@ -1307,7 +1547,7 @@ export function dispatchTestMode(
       return { ok: true };
     }
   }
-  if (path === "/api/reviewloop/me/data-export" && method === "GET") {
+  if (path === "/api/goodword/me/data-export" && method === "GET") {
     const s = getTestState();
     return {
       business: s.business,
@@ -1318,7 +1558,7 @@ export function dispatchTestMode(
       ledger: s.credits.ledger,
     };
   }
-  if (path === "/api/reviewloop/me/account" && method === "DELETE") {
+  if (path === "/api/goodword/me/account" && method === "DELETE") {
     resetTestState();
     resetMockSessionStores();
     if (typeof localStorage !== "undefined") {
@@ -1338,14 +1578,14 @@ export async function runTestModeCsvUpload(
     consent: boolean;
     channel: "auto" | "email" | "sms";
     enqueue: boolean;
-    emailCampaignId?: string;
-    smsCampaignId?: string;
+    emailTemplateId?: string;
+    smsTemplateId?: string;
     locationId?: string;
-  }
+  },
 ): Promise<{ rows: number; imported: number; queued: number; errors: string[] }> {
   if (!opts.consent) {
     throw new Error(
-      "You must attest that every customer in this CSV consented to receive a review request from your business."
+      "You must attest that every customer in this CSV consented to receive a review request from your business.",
     );
   }
   const text = await file.text();
@@ -1353,7 +1593,7 @@ export async function runTestModeCsvUpload(
   if (lines.length < 1) {
     return { rows: 0, imported: 0, queued: 0, errors: ["The file is empty."] };
   }
-  const headers = lines[0]!.split(",").map((h) => h.replace(/^\ufeff?/, "").replace(/"/g, "").trim().toLowerCase());
+  const headers = lines[0]!.split(",").map((h) => h.replace(/^﻿?/, "").replace(/"/g, "").trim().toLowerCase());
   const iEmail = headers.findIndex((h) => h === "email" || h === "e-mail" || h.endsWith(" email"));
   const iPhone = headers.findIndex((h) => h.includes("phone") || h === "mobile" || h === "tel");
   const iName = headers.findIndex((h) => h === "name" || h === "first name" || h === "full name");
@@ -1362,9 +1602,16 @@ export async function runTestModeCsvUpload(
   }
   const csvLoc = opts.locationId && String(opts.locationId).trim() ? String(opts.locationId).trim() : null;
   let rowCount = 0;
+  // ``imported`` counts every row we successfully processed — including ones
+  // that merged into an existing contact, matching how the real backend
+  // reports the number (see csv_intake.py).
   let imported = 0;
   let queued = 0;
   const errors: string[] = [];
+  // Track in-CSV duplicates as well, so a file with the same email twice
+  // collapses to a single contact, like the server does.
+  const seenEmails = new Set<string>();
+  const seenPhones = new Set<string>();
   for (let n = 1; n < lines.length; n++) {
     const cells = lines[n]!.split(",").map((c) => c.replace(/^"|"$/g, "").trim());
     rowCount += 1;
@@ -1374,24 +1621,43 @@ export async function runTestModeCsvUpload(
       errors.push(`row ${n + 1}: missing email and phone`);
       continue;
     }
+    if ((em && seenEmails.has(em)) || (ph && seenPhones.has(ph))) {
+      // Same person earlier in this CSV — silently skip the duplicate row.
+      continue;
+    }
+    if (em) seenEmails.add(em);
+    if (ph) seenPhones.add(ph);
     const name = iName >= 0 && cells[iName!] ? cells[iName]!.slice(0, 120) : null;
     try {
       mutate((s) => {
-        const c: Contact = {
-          id: newId(),
-          business_id: s.business.id,
-          name,
-          email: em,
-          phone_e164: ph,
-          source: "csv",
-          consent_attested_at: nowIso(),
-          unsubscribed_at: null,
-          last_message_at: null,
-          external_ref: null,
-          created_at: nowIso(),
-          location_id: csvLoc,
-        };
-        s.contacts = [c, ...s.contacts];
+        // Dedup against contacts already in the test fixture — repeat CSV
+        // imports of the same customer should update, not stack.
+        const existing = findContactByEmailOrPhone(s.contacts, s.business.id, em, ph);
+        let c: Contact;
+        if (existing) {
+          if (name) existing.name = name;
+          if (em) existing.email = em;
+          if (ph) existing.phone_e164 = ph;
+          existing.consent_attested_at = nowIso();
+          if (csvLoc !== null) existing.location_id = csvLoc;
+          c = existing;
+        } else {
+          c = {
+            id: newId(),
+            business_id: s.business.id,
+            name,
+            email: em,
+            phone_e164: ph,
+            source: "csv",
+            consent_attested_at: nowIso(),
+            unsubscribed_at: null,
+            last_message_at: null,
+            external_ref: null,
+            created_at: nowIso(),
+            location_id: csvLoc,
+          };
+          s.contacts = [c, ...s.contacts];
+        }
         imported += 1;
         if (opts.enqueue) {
           const b = s.business;
@@ -1409,8 +1675,8 @@ export async function runTestModeCsvUpload(
           if (ch === "sms" && !c.phone_e164) {
             throw new Error("row needs E.164 phone for SMS");
           }
-          const camId = ch === "email" ? opts.emailCampaignId : opts.smsCampaignId;
-          enqueue(s, c, ch, camId);
+          const templId = ch === "email" ? opts.emailTemplateId : opts.smsTemplateId;
+          enqueue(s, c, ch, templId);
           queued += 1;
         }
       });

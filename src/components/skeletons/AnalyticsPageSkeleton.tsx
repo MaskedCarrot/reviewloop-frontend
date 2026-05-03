@@ -14,7 +14,7 @@ export default function AnalyticsPageSkeleton() {
         <ShimmerBlock className="h-2.5 w-56 max-w-sm mb-3" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="rounded-lg border border-slate-100/90 bg-slate-50/80 px-3 py-2.5">
+            <div key={i} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
               <ShimmerBlock className="h-2.5 w-20 mb-2" />
               <ShimmerBlock className="h-7 w-14" />
             </div>

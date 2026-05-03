@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { isAdminUser } from "@/lib/api";
 import { DASHBOARD_NAV_SECTIONS } from "@/lib/dashboardNav";
 import { useDashboardNavigation } from "@/components/DashboardNavigationContext";
 import Logo from "./Logo";
@@ -19,12 +20,11 @@ export default function DashboardNav() {
   };
 
   return (
-    // Sticky, viewport-tall on md so the aside is not stretch-tall with main; otherwise mt-auto sign-out sits at the bottom of the full page
     <aside
-      className="w-full md:w-52 md:shrink-0 print:hidden border-b md:border-b-0 md:border-r border-slate-200/50 bg-white flex flex-col md:sticky md:top-0 md:h-screen md:overflow-hidden"
+      className="w-full md:w-60 md:shrink-0 print:hidden border-b md:border-b-0 md:border-r border-slate-200/70 bg-[color:var(--color-panel-subtle)]/90 backdrop-blur-sm flex flex-col md:sticky md:top-0 md:h-screen md:overflow-hidden"
     >
       {/* Mobile: logo + sign out */}
-      <div className="flex md:hidden items-center justify-between gap-3 px-3 py-2.5 border-b border-slate-200/50 shrink-0">
+      <div className="flex md:hidden items-center justify-between gap-3 px-3 py-2.5 border-b border-slate-200 shrink-0">
         <Logo size="sm" />
         <button
           type="button"
@@ -36,7 +36,7 @@ export default function DashboardNav() {
       </div>
 
       <div className="flex w-full min-w-0 flex-1 min-h-0 flex-col py-1 md:py-5 px-0 md:px-3">
-        <div className="hidden md:block px-1 pb-3 md:pb-4 shrink-0">
+        <div className="hidden md:block px-1.5 pb-3 md:pb-5 shrink-0">
           <Logo />
         </div>
         <nav
@@ -50,14 +50,14 @@ export default function DashboardNav() {
               key={section.heading}
               className={[
                 "flex flex-row flex-wrap md:flex-col gap-0.5 w-full min-w-[min(100%,8rem)]",
-                sectionIdx > 0 && "pt-1.5 mt-0.5 border-t border-slate-100/90 md:pt-0 md:mt-3 md:border-0",
+                sectionIdx > 0 && "pt-1.5 mt-0.5 border-t border-slate-100 md:pt-0 md:mt-4 md:border-0",
               ]
                 .filter(Boolean)
                 .join(" ")}
             >
               <div
-                className="hidden md:block w-full text-[10px] font-semibold uppercase tracking-wider text-slate-400
-                  pl-0.5 mb-0.5"
+                className="hidden md:block w-full text-[10px] font-semibold uppercase tracking-[0.16em] text-warm-700
+                  pl-2 mb-2"
                 aria-hidden
               >
                 {section.heading}
@@ -82,13 +82,13 @@ export default function DashboardNav() {
                       navigate(item.href);
                     }}
                     className={[
-                      "px-2.5 py-1.5 rounded-md text-sm transition-colors",
+                      "relative px-3 py-2 rounded-lg text-sm transition-all",
                       "whitespace-nowrap",
                       "w-auto md:w-full",
                       routeActive
-                        ? "text-slate-900 bg-slate-100 font-medium"
-                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-50",
-                      pendingPath === item.href ? "ring-1 ring-slate-200/80" : "",
+                        ? "text-slate-900 bg-white font-semibold ring-1 ring-slate-200/80 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_6px_14px_-8px_rgba(15,23,42,0.16)]"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-white/70",
+                      pendingPath === item.href ? "ring-1 ring-warm-300" : "",
                     ].join(" ")}
                     aria-current={routeActive ? "page" : undefined}
                   >
@@ -100,14 +100,30 @@ export default function DashboardNav() {
           ))}
         </nav>
 
-        <div className="hidden md:flex flex-col gap-1 mt-auto pt-4 border-t border-slate-100 px-1 shrink-0">
-          <div className="text-[11px] text-slate-400 truncate" title={user?.email || undefined}>
-            {user?.email}
+        <div className="hidden md:flex flex-col gap-1.5 mt-auto pt-4 border-t border-slate-200/70 px-2 shrink-0">
+          <div className="flex items-center gap-2.5 px-1 py-1">
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-warm-100 text-warm-800 text-[11px] font-bold ring-1 ring-warm-200">
+              {(user?.email?.[0] ?? "?").toUpperCase()}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold text-slate-800 truncate" title={user?.email || undefined}>
+                {user?.email}
+              </p>
+              <p className="text-[10px] text-slate-500">Signed in</p>
+            </div>
           </div>
+          {isAdminUser(user?.email) && (
+            <Link
+              href="/admin"
+              className="text-left text-xs font-semibold text-warm-700 hover:text-warm-900 py-1 px-1 w-fit transition-colors"
+            >
+              Admin →
+            </Link>
+          )}
           <button
             type="button"
             onClick={onSignOut}
-            className="text-left text-xs text-slate-500 hover:text-slate-800 py-0.5 w-fit"
+            className="text-left text-xs font-medium text-slate-600 hover:text-slate-900 py-1 px-1 w-fit transition-colors"
           >
             Sign out
           </button>

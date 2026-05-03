@@ -1,45 +1,343 @@
 import Link from "next/link";
 import MarketingHeader from "@/components/MarketingHeader";
 import MarketingFooter from "@/components/marketing/MarketingFooter";
+import Reveal from "@/components/marketing/Reveal";
 
-export const metadata = { title: "Support · ReviewLoop" };
+export const metadata = {
+  title: "Help & contact · GoodWord",
+  description:
+    "Real human support, same day. Read the quick fixes for the most common setup questions, then email or schedule a call if you still need a hand.",
+};
 
-const SUPPORT_EMAIL = "support-reviewloop@maskedcarrotlabs.com";
+const SUPPORT_EMAIL = "support-goodword@maskedcarrotlabs.com";
 
 const supportMailto = `mailto:${SUPPORT_EMAIL}?${new URLSearchParams({
-  subject: "ReviewLoop — support",
+  subject: "GoodWord — support",
   body: "Hi team,\n\nMy business: \n\nI need help with: \n\n",
 }).toString()}`;
 
-const scheduleCallMailto = `mailto:${SUPPORT_EMAIL}?${new URLSearchParams({
-  subject: "Schedule a call — ReviewLoop",
-  body: "Hi — I'd like to book a short call. My business: \n\nWhat I'd like to cover: \n",
+const callMailto = `mailto:${SUPPORT_EMAIL}?${new URLSearchParams({
+  subject: "Schedule a 20-min call — GoodWord",
+  body:
+    "Hi — I'd like to book a short call.\n\nMy business: \nA good time for me: \nWhat I'd like to cover: \n",
 }).toString()}`;
 
-function IconZap({ className }: { className?: string }) {
+const COMMON_SETUP: { title: string; body: string }[] = [
+  {
+    title: "1. Confirm your business basics",
+    body:
+      "Sign in → Settings → Business. Your business name shows up as the \"From\" label on every send, so put your real, customer-facing name. Country and timezone control quiet hours. No DNS, no DKIM — sending is already authenticated on our side.",
+  },
+  {
+    title: "2. Add your review links",
+    body:
+      "Settings → Locations → Review links. Drop in your Google, Yelp, Facebook (or any other) link. We'll auto-suggest your Google review link if you tell us your business name + city.",
+  },
+  {
+    title: "3. Pick a starter template",
+    body:
+      "Templates → New from preset. We ship voice-tuned starters per industry (café, salon, dentist, trades, restaurant, ecom). Edit the sentence, save, send a test to yourself.",
+  },
+  {
+    title: "4. Bring in a few customers",
+    body:
+      "People → Add. Upload a small CSV (we accept any column order — just tell us which is the email), or print the QR poster from QR → Print. Send your first batch when you're ready.",
+  },
+];
+
+const QUICK_FAQ: { q: string; a: string; href?: string }[] = [
+  {
+    q: "Emails are landing in promotions / spam",
+    a: "Sender authentication is handled on our side, so it's almost never a DNS issue. Most often it's a subject line that screams promotional (\"Please leave us a 5-star review!\") or a contact list with stale addresses. Try a calmer subject and check your suppression list under Settings → Suppressions. Email us if it persists — we read the headers for you.",
+  },
+  {
+    q: "I can't find my Google review link",
+    a: "Search your business in Google Maps → 'Write a review'. Copy that URL into Settings → Locations → Review links. Or — paste your Place ID and we'll generate the link for you.",
+  },
+  {
+    q: "How do I import customers from Square / Toast / Jobber?",
+    a: "Export to CSV from your tool, then drag the file onto People → Import. We'll auto-map columns — you only need name + email at minimum.",
+  },
+  {
+    q: "Why isn't anyone replying yet?",
+    a: "Two things to check, in order: (1) is your timing reasonable for your industry? (cafés: ~4h after visit; salons: ~2h; trades: next day) (2) is your subject line conversational, not 'Please leave us a 5-star review!'? The defaults we ship are good — small tweaks beat big ones. Sender authentication is already handled on our side.",
+  },
+  {
+    q: "Can I bulk-stop sends to one customer?",
+    a: "Yes. People → Search them → 'Stop messaging'. They'll be permanently suppressed across all locations under your business.",
+  },
+  {
+    q: "I want SMS, not email — how do I enable it?",
+    a: "SMS is opt-in. Settings → Messaging → 'Request SMS access'. We'll get back to you the same business day to switch it on for your account.",
+  },
+];
+
+export default function SupportPage() {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"
-      />
-    </svg>
+    <div className="marketing-root">
+      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden>
+        <div className="absolute -top-32 right-[-15%] h-[24rem] w-[24rem] rounded-full bg-gradient-to-br from-warm-200/50 via-warm-100/30 to-transparent blur-3xl animate-float-blob" />
+        <div className="absolute bottom-[-8rem] left-[-15%] h-[18rem] w-[18rem] rounded-full bg-gradient-to-tr from-emerald-100/40 to-brand-100/30 blur-3xl animate-float-blob-2" />
+      </div>
+
+      <MarketingHeader />
+
+      {/* ---------------- HERO ---------------- */}
+      <section className="marketing-section pt-12 sm:pt-16 pb-8">
+        <div className="max-w-3xl mx-auto text-center">
+          <span className="marketing-eyebrow mx-auto">
+            <span className="h-1.5 w-1.5 rounded-full bg-warm-500" />
+            Help & contact
+          </span>
+          <h1 className="display-title-xl mt-4 text-slate-900">
+            Real humans. <em>Same day.</em>
+          </h1>
+          <p className="mt-5 text-lg text-slate-700 leading-relaxed">
+            Most issues are fixed below in two minutes. If yours isn't, write to us — we
+            read every message and reply the same business day.
+          </p>
+          <div className="mt-6 flex items-center justify-center gap-2">
+            <span className="relative inline-flex h-2.5 w-2.5">
+              <span className="absolute inset-0 rounded-full bg-emerald-400 animate-pulse-ring" />
+              <span className="relative inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
+            </span>
+            <span className="text-sm font-semibold text-emerald-800">
+              All systems normal — usually replying within 2-4 hours
+            </span>
+          </div>
+        </div>
+      </section>
+
+      {/* ---------------- GET HELP CARDS ---------------- */}
+      <section className="marketing-section pt-4 pb-12 max-w-5xl">
+        <div className="grid gap-5 md:grid-cols-2">
+          <Reveal>
+            <div className="rounded-3xl border border-slate-200/80 bg-white p-6 sm:p-7 shadow-soft h-full flex flex-col">
+              <div className="flex items-start gap-3">
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-brand-50 text-brand-700 ring-1 ring-brand-200">
+                  <MailIcon className="h-5 w-5" />
+                </span>
+                <div>
+                  <h2 className="display-title text-xl text-slate-900">Write to us</h2>
+                  <p className="mt-1.5 text-sm text-slate-700 leading-relaxed">
+                    Add your business name and what you'd like sorted. We read everything.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 sm:mt-auto pt-5">
+                <a href={supportMailto} className="cta-warm w-full justify-center">
+                  <MailIcon className="h-4 w-4" />
+                  Open in your email app
+                </a>
+                <p className="mt-3 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Or write to
+                </p>
+                <p className="mt-1 text-center text-sm text-slate-700 font-mono break-all">
+                  {SUPPORT_EMAIL}
+                </p>
+              </div>
+            </div>
+          </Reveal>
+
+          <Reveal delay={100}>
+            <div className="rounded-3xl border border-warm-200/80 bg-gradient-to-br from-warm-50 to-white p-6 sm:p-7 shadow-soft h-full flex flex-col">
+              <div className="flex items-start gap-3">
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-warm-100 text-warm-700 ring-1 ring-warm-200">
+                  <CalendarIcon className="h-5 w-5" />
+                </span>
+                <div>
+                  <h2 className="display-title text-xl text-slate-900">Schedule a 20-min call</h2>
+                  <p className="mt-1.5 text-sm text-slate-700 leading-relaxed">
+                    Best for setup walkthroughs, deliverability questions, or trickier multi-location stuff.
+                  </p>
+                </div>
+              </div>
+              <ul className="mt-5 space-y-1.5 text-sm text-slate-700">
+                {[
+                  "Find your Google Place ID + review link",
+                  "Pick the right template for your industry",
+                  "Sanity-check your first send",
+                  "Talk through pricing or multi-location setups",
+                ].map((line) => (
+                  <li key={line} className="flex items-start gap-2">
+                    <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                    <span>{line}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-5 sm:mt-auto pt-5">
+                <a href={callMailto} className="cta-secondary w-full justify-center">
+                  <CalendarIcon className="h-4 w-4" />
+                  Request a call
+                </a>
+                <p className="mt-3 text-center text-[11px] text-slate-500">
+                  No hard sell. Honest 20 minutes.
+                </p>
+              </div>
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ---------------- COMMON SETUP ---------------- */}
+      <section className="marketing-section py-12 max-w-5xl">
+        <Reveal>
+          <p className="marketing-eyebrow">
+            <span className="h-1.5 w-1.5 rounded-full bg-warm-500" />
+            Common setup
+          </p>
+          <h2 className="display-title-lg mt-3 text-slate-900">
+            The 4 things to do on day one.
+          </h2>
+          <p className="mt-3 text-base text-slate-700 max-w-xl">
+            If you've never set up an email tool before — start here. Each step takes just
+            a few minutes.
+          </p>
+        </Reveal>
+
+        <ol className="mt-8 grid gap-4 sm:grid-cols-2">
+          {COMMON_SETUP.map((row, i) => (
+            <Reveal key={row.title} as="li" delay={i * 60}>
+              <div className="h-full rounded-3xl border border-slate-200/80 bg-white p-6 shadow-soft hover:shadow-card-hover transition-shadow">
+                <h3 className="text-base font-semibold text-slate-900">{row.title}</h3>
+                <p className="mt-2 text-sm text-slate-700 leading-relaxed">{row.body}</p>
+              </div>
+            </Reveal>
+          ))}
+        </ol>
+      </section>
+
+      {/* ---------------- QUICK FAQ ---------------- */}
+      <section className="marketing-section py-12 max-w-3xl">
+        <Reveal>
+          <p className="marketing-eyebrow">
+            <span className="h-1.5 w-1.5 rounded-full bg-warm-500" />
+            Quick fixes
+          </p>
+          <h2 className="display-title-lg mt-3 text-slate-900">
+            The 6 things people ask most.
+          </h2>
+        </Reveal>
+
+        <div className="mt-7 divide-y divide-slate-200 rounded-3xl border border-slate-200/80 bg-white shadow-soft overflow-hidden">
+          {QUICK_FAQ.map((row, i) => (
+            <details key={row.q} className="group" open={i === 0}>
+              <summary className="cursor-pointer list-none px-5 sm:px-7 py-4 sm:py-5 flex items-center justify-between gap-4 hover:bg-slate-50/80">
+                <span className="text-base font-semibold text-slate-900">{row.q}</span>
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-700 transition-transform group-open:rotate-45">
+                  <PlusIcon className="h-4 w-4" />
+                </span>
+              </summary>
+              <p className="px-5 sm:px-7 pb-5 sm:pb-6 text-sm sm:text-[0.95rem] text-slate-700 leading-relaxed">
+                {row.a}
+              </p>
+            </details>
+          ))}
+        </div>
+
+        <p className="mt-6 text-sm text-slate-600 text-center">
+          More in our{" "}
+          <Link href="/faq" className="link">
+            full FAQ
+          </Link>
+          .
+        </p>
+      </section>
+
+      {/* ---------------- STATUS / TRUST ---------------- */}
+      <section className="marketing-section py-12 max-w-5xl">
+        <Reveal>
+          <div className="rounded-3xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50 to-white p-6 sm:p-8 shadow-soft">
+            <div className="grid gap-5 sm:grid-cols-3">
+              {[
+                {
+                  label: "Avg first reply",
+                  value: "2–4h",
+                  hint: "During business hours",
+                },
+                {
+                  label: "Issues resolved in 1 reply",
+                  value: "78%",
+                  hint: "Last 90 days",
+                },
+                {
+                  label: "Founder-replies",
+                  value: "Often",
+                  hint: "On harder questions",
+                },
+              ].map((row) => (
+                <div key={row.label} className="rounded-2xl border border-slate-200 bg-white p-4 text-center">
+                  <p className="text-2xl sm:text-3xl font-display font-medium text-slate-900 leading-none">
+                    {row.value}
+                  </p>
+                  <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    {row.label}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">{row.hint}</p>
+                </div>
+              ))}
+            </div>
+            <p className="mt-5 text-sm text-slate-700 leading-relaxed">
+              We're a small team — but you'll never get stuck in a chatbot loop. If your
+              question takes time, we'll tell you the timeline up-front.
+            </p>
+          </div>
+        </Reveal>
+      </section>
+
+      {/* ---------------- FOOTER NAV ---------------- */}
+      <section className="marketing-section pb-20">
+        <nav
+          className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-sm text-slate-600"
+          aria-label="Related pages"
+        >
+          <Link href="/" className="link">
+            Home
+          </Link>
+          <span className="text-slate-400" aria-hidden>
+            ·
+          </span>
+          <Link href="/how-it-works" className="link">
+            How it works
+          </Link>
+          <span className="text-slate-400" aria-hidden>
+            ·
+          </span>
+          <Link href="/pricing" className="link">
+            Pricing
+          </Link>
+          <span className="text-slate-400" aria-hidden>
+            ·
+          </span>
+          <Link href="/faq" className="link">
+            FAQ
+          </Link>
+          <span className="text-slate-400" aria-hidden>
+            ·
+          </span>
+          <Link href="/privacy" className="link">
+            Privacy
+          </Link>
+        </nav>
+      </section>
+
+      <MarketingFooter />
+    </div>
   );
 }
 
-function IconMail({ className }: { className?: string }) {
+function MailIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
       <path d="M4 6h16v12H4V6z" strokeLinejoin="round" />
       <path d="M4 7l8 6 8-6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
-function IconCalendar({ className }: { className?: string }) {
+function CalendarIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -49,134 +347,18 @@ function IconCalendar({ className }: { className?: string }) {
   );
 }
 
-export default function SupportPage() {
+function CheckIcon({ className }: { className?: string }) {
   return (
-    <div className="marketing-root">
-      <MarketingHeader />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden>
+      <path d="M5 12l5 5 9-11" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
-      <main className="flex-1 marketing-section py-10 sm:py-14 max-w-5xl pb-16">
-        <header className="marketing-narrow app-section shadow-soft">
-          <p className="app-eyebrow">Support</p>
-          <h1 className="app-title-hero mt-1">We get back to you fast</h1>
-          <p className="app-subtitle text-slate-600 sm:text-base mt-3 leading-relaxed">
-            Real people read every message. On business days we usually reply the same day — often within a few hours.
-            Thorough or technical issues may take an extra back-and-forth; we always acknowledge right away and set clear
-            expectations.
-          </p>
-        </header>
-
-        <div className="mt-8 sm:mt-10 grid gap-4 sm:gap-6 sm:grid-cols-2">
-          <section className="flex flex-col app-section p-6 sm:p-7 shadow-sm sm:min-h-[13rem]">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/70">
-                <IconZap className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="text-base font-semibold text-slate-900">What to expect</h2>
-                <p className="mt-1.5 text-sm text-slate-600 leading-relaxed">
-                  A prompt first response with next steps — not a ticket in the void, and not a one-size "bot" runaround.
-                </p>
-                <ul className="mt-4 space-y-2 text-sm text-slate-600">
-                  <li className="flex gap-2">
-                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden />
-                    Same business day for most questions (UK &amp; US hours)
-                  </li>
-                  <li className="flex gap-2">
-                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden />
-                    Heavy cases (e.g. deliverability) get a real timeline, not radio silence
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </section>
-
-          <section className="flex flex-col justify-between app-section p-6 sm:p-7 shadow-sm sm:min-h-[13rem]">
-            <div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-100 text-brand-800 ring-1 ring-brand-200/60">
-                <IconMail className="h-5 w-5" />
-              </div>
-              <h2 className="mt-3 text-base font-semibold text-slate-900">Write to us</h2>
-              <p className="mt-1.5 text-sm text-slate-600 leading-relaxed">
-                Add your business name and what you need; we read everything.
-              </p>
-            </div>
-            <div className="mt-6 sm:mt-4">
-              <a
-                href={supportMailto}
-                className="inline-flex w-full items-center justify-center gap-2.5 rounded-xl border border-brand-200/80 bg-gradient-to-b from-white to-slate-50/90 px-4 py-3.5 text-sm font-semibold text-slate-900 shadow-sm transition hover:border-brand-300 hover:from-white hover:to-brand-50/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-400/35 focus:ring-offset-2 sm:py-3.5"
-              >
-                <IconMail className="h-[1.1rem] w-[1.1rem] text-brand-700" />
-                <span>Open in your email app</span>
-              </a>
-              <p className="mt-3 text-center sm:text-left">
-                <span className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Or write to</span>
-                <br />
-                <span
-                  className="mt-1 inline-block break-all text-sm text-slate-600 font-mono tabular-nums selection:bg-brand-100/80"
-                  title="Support address"
-                >
-                  {SUPPORT_EMAIL}
-                </span>
-              </p>
-            </div>
-          </section>
-        </div>
-
-        <section className="mt-4 overflow-hidden rounded-2xl border border-amber-200/70 bg-gradient-to-r from-amber-50/90 via-amber-50/35 to-white shadow-sm sm:mt-5">
-          <div className="grid gap-6 p-6 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-8 sm:p-8">
-            <div className="flex gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white text-amber-700 shadow-sm ring-1 ring-amber-200/80">
-                <IconCalendar className="h-6 w-6" />
-              </div>
-              <div>
-                <h2 className="text-base font-semibold text-slate-900">Prefer a call?</h2>
-                <p className="mt-1.5 text-sm text-slate-700 leading-relaxed">
-                  Send a short note and we'll reply by email to set a time — no pressure, no hard sell. Good for setup
-                  walkthroughs or quick questions.
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-col sm:shrink-0 sm:items-end">
-              <a
-                href={scheduleCallMailto}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300/60 bg-white px-6 py-3 text-sm font-semibold text-amber-950 shadow-sm transition hover:bg-amber-50/80 hover:border-amber-400/70 min-h-12 sm:w-auto sm:min-w-[10.5rem]"
-              >
-                <IconCalendar className="h-4 w-4 opacity-80" />
-                Request a call
-              </a>
-            </div>
-          </div>
-        </section>
-
-        <nav
-          className="mt-10 flex flex-wrap items-center justify-center gap-x-1 gap-y-2 text-sm text-slate-500"
-          aria-label="Related pages"
-        >
-          <Link href="/" className="rounded-lg px-2 py-1 text-brand-600 font-medium hover:bg-slate-100/80 hover:underline">
-            Home
-          </Link>
-          <span className="text-slate-300" aria-hidden>
-            ·
-          </span>
-          <Link
-            href="/pricing"
-            className="rounded-lg px-2 py-1 text-brand-600 font-medium hover:bg-slate-100/80 hover:underline"
-          >
-            Pricing
-          </Link>
-          <span className="text-slate-300" aria-hidden>
-            ·
-          </span>
-          <Link
-            href="/privacy"
-            className="rounded-lg px-2 py-1 text-brand-600 font-medium hover:bg-slate-100/80 hover:underline"
-          >
-            Privacy
-          </Link>
-        </nav>
-      </main>
-
-      <MarketingFooter />
-    </div>
+function PlusIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden>
+      <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+    </svg>
   );
 }

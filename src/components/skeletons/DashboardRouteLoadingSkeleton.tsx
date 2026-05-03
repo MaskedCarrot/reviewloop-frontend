@@ -11,7 +11,7 @@ export default function DashboardRouteLoadingSkeleton() {
         <ShimmerBlock className="h-6 w-48" />
         <ShimmerBlock className="h-3 w-72 max-w-full" />
       </div>
-      <div className="card p-5 border-slate-200/80 ring-1 ring-slate-100 min-h-[220px]">
+      <div className="card p-5 border-slate-200 ring-1 ring-slate-100 min-h-[220px]">
         <ShimmerBlock className="h-4 w-40 mb-5" />
         <div className="space-y-3">
           {[0, 1, 2, 3, 4].map((i) => (

@@ -39,7 +39,7 @@ export default function PauseCampaignConfirmDialog({ open, onOpenChange, campaig
       }}
     >
       <div
-        className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-2xl shadow-slate-900/10"
+        className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/10"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-1 bg-gradient-to-br from-amber-50/90 via-white to-rose-50/40">
@@ -71,7 +71,7 @@ export default function PauseCampaignConfirmDialog({ open, onOpenChange, campaig
             </div>
           </div>
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
+        <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-4 py-3 sm:px-5">
           <button
             type="button"
             className="btn-ghost text-sm h-9 px-4"

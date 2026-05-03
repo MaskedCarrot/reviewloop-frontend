@@ -1,6 +1,6 @@
-# ReviewLoop frontend
+# GoodWord frontend
 
-Next.js 14 + Tailwind dashboard and public surfaces for ReviewLoop.
+Next.js 14 + Tailwind dashboard and public surfaces for GoodWord.
 
 ## Local dev
 
@@ -38,4 +38,4 @@ The backend must be running at http://127.0.0.1:8000 (see `shared-backend/`).
 1. Push to GitHub.
 2. New Vercel project → import repo.
 3. Set env vars (NEXT_PUBLIC_API_URL, NEXT_PUBLIC_SITE_URL, NEXT_PUBLIC_GOOGLE_CLIENT_ID).
-4. Add custom domain `reviewloop.maskedcarrotlabs.com` and follow DNS instructions.
+4. Add custom domain `goodword.maskedcarrotlabs.com` and follow DNS instructions.

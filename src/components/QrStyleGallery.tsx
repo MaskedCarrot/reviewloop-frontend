@@ -22,7 +22,7 @@ export function QrStyleGallerySkeleton() {
         {Array.from({ length: 8 }, (_, i) => `s-${i}`).map((k) => (
           <div
             key={k}
-            className="animate-pulse snap-center shrink-0 w-[min(280px,85vw)] rounded-2xl border border-slate-200/90 bg-gradient-to-b from-white to-slate-50/90 p-4 shadow-sm flex flex-col"
+            className="animate-pulse snap-center shrink-0 w-[min(280px,85vw)] rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/90 p-4 shadow-sm flex flex-col"
           >
             <div className="flex h-[220px] min-h-[220px] items-center justify-center rounded-xl bg-slate-100/90 p-3 ring-1 ring-slate-100">
               <div className="h-[200px] w-[200px] shrink-0 rounded-lg bg-slate-200/70" />
@@ -36,7 +36,7 @@ export function QrStyleGallerySkeleton() {
           </div>
         ))}
       </div>
-      <p className="text-xs text-slate-400 mt-1 text-center sm:hidden">Swipe for more styles</p>
+      <p className="text-xs text-slate-500 mt-1 text-center sm:hidden">Swipe for more styles</p>
     </div>
   );
 }
@@ -204,7 +204,7 @@ export default function QrStyleGallery({ data, brandColor }: { data: string; bra
         {list.map((p, i) => (
           <div
             key={p.id}
-            className="snap-center shrink-0 w-[min(280px,85vw)] rounded-2xl border border-slate-200/90 bg-gradient-to-b from-white to-slate-50/90 p-4 shadow-sm flex flex-col"
+            className="snap-center shrink-0 w-[min(280px,85vw)] rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/90 p-4 shadow-sm flex flex-col"
           >
             <div className="flex h-[220px] min-h-[220px] items-center justify-center rounded-xl bg-white p-3 ring-1 ring-slate-100">
               <div
@@ -215,12 +215,12 @@ export default function QrStyleGallery({ data, brandColor }: { data: string; bra
               />
             </div>
             <h3 className="mt-3 text-sm font-semibold text-slate-900">{p.label}</h3>
-            <p className="text-xs text-slate-500 mt-0.5 leading-relaxed grow">{p.description}</p>
+            <p className="text-xs text-slate-600 mt-0.5 leading-relaxed grow">{p.description}</p>
             <button
               type="button"
               onClick={() => {
                 const qr = instancesRef.current[i];
-                if (qr) qr.download({ name: `reviewloop-qr-${p.id}`, extension: "png" });
+                if (qr) qr.download({ name: `goodword-qr-${p.id}`, extension: "png" });
               }}
               className="btn-primary text-sm w-full mt-3 py-2"
             >
@@ -229,7 +229,7 @@ export default function QrStyleGallery({ data, brandColor }: { data: string; bra
           </div>
         ))}
       </div>
-      <p className="text-xs text-slate-400 mt-1 text-center sm:hidden">Swipe for more styles</p>
+      <p className="text-xs text-slate-500 mt-1 text-center sm:hidden">Swipe for more styles</p>
     </div>
   );
 }
